@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: r-tunnel
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PUBLIC_BASE_DOMAIN
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: TUNNEL_MASTER_TOKEN
+        sync: false
+      - key: MAX_ACTIVE_TUNNELS
+        value: "5"
+      - key: MAX_REQUESTS_PER_MINUTE
+        value: "120"
+      - key: MAX_BODY_SIZE
+        value: "10mb"
+      - key: MAX_WS_MESSAGE_SIZE
+        value: "12mb"
+      - key: DEFAULT_TUNNEL_DURATION
+        value: "1h"
+      - key: MAX_TUNNEL_DURATION
+        value: "3h"
+      - key: IDLE_TIMEOUT_MINUTES
+        value: "0"
+      - key: LOG_LEVEL
+        value: "info"

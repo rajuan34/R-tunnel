@@ -1,0 +1,6 @@
+{
+  "name": "R-Tunnel — Temporary HTTP/HTTPS Tunnel Service",
+  "description": "Production-ready temporary HTTP/HTTPS tunneling service for exposing local Termux servers via secure public URLs",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

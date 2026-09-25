@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — R-Tunnel Temporary HTTP/HTTPS Service</title>
+  <meta name="description" content="Manage and monitor active temporary HTTP/HTTPS tunnels for Android Termux.">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">R</div>
+        <div class="brand-text">
+          <h1>R-Tunnel</h1>
+          <span>Developer Cloud</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-link active" data-tab="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Dashboard
+        </button>
+        <button class="nav-link" data-tab="tunnels">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
+          Active Tunnels
+        </button>
+        <button class="nav-link" onclick="window.openCreateModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+          Create Tunnel
+        </button>
+        <button class="nav-link" data-tab="activity">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          Activity Log
+        </button>
+        <button class="nav-link" data-tab="docs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+          Documentation
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="system-status" class="system-status-indicator">
+          <span class="status-dot"></span>
+          <span>SYSTEM ONLINE</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Toggle navigation">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <h2 class="page-title">Temporary Tunnel Service</h2>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            New Tunnel
+          </button>
+          <div style="font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+            <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: #1e293b; border: 1px solid var(--border-muted); text-align: center; line-height: 26px; font-weight: 700; color: #a5b4fc;">A</span>
+            <span id="current-username" style="font-weight: 600; color: var(--text-main);">admin</span>
+            <button id="logout-btn" class="btn btn-secondary btn-sm" style="padding: 4px 8px; margin-left: 4px;" title="Logout">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div class="content-body">
+        <!-- Dashboard & Tunnels View -->
+        <section id="view-dashboard" class="tab-view">
+          <!-- Metrics Grid -->
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Active Tunnels</div>
+              <div class="metric-value" id="stat-active-tunnels">0</div>
+              <div class="metric-sub">Auto-expiring securely</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Requests</div>
+              <div class="metric-value" id="stat-total-requests">0</div>
+              <div class="metric-sub">Proxied via WebSockets</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Network Bandwidth</div>
+              <div class="metric-value" id="stat-bandwidth">0 B</div>
+              <div class="metric-sub">Buffered transfer volume</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Connected Clients</div>
+              <div class="metric-value" id="stat-connected-clients">0</div>
+              <div class="metric-sub">Android Termux workers</div>
+            </div>
+          </div>
+
+          <!-- Active Tunnels Section -->
+          <div class="section-header">
+            <h3 class="section-title">
+              Active Tunnels
+              <span id="active-tunnels-count" class="status-badge badge-connected" style="margin-left: 8px;">0</span>
+            </h3>
+            <button class="btn btn-secondary btn-sm" onclick="window.openCreateModal()">+ Create Tunnel</button>
+          </div>
+
+          <div id="tunnels-container" class="tunnels-grid">
+            <!-- Populated dynamically by dashboard.js -->
+          </div>
+        </section>
+
+        <!-- Separate Tunnels Tab View (mirrors dashboard list) -->
+        <section id="view-tunnels" class="tab-view" style="display: none;">
+          <div class="section-header">
+            <h3 class="section-title">All Registered Tunnels</h3>
+            <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">+ New Tunnel</button>
+          </div>
+          <div id="tunnels-container-secondary" class="tunnels-grid"></div>
+        </section>
+
+        <!-- Activity Log Tab View -->
+        <section id="view-activity" class="tab-view" style="display: none;">
+          <div class="section-header">
+            <h3 class="section-title">Request Activity Stream</h3>
+            <span style="font-size: 12px; color: var(--text-dim);">Live sanitized traffic (sensitive tokens & cookies redacted)</span>
+          </div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Tunnel</th>
+                  <th>Method</th>
+                  <th>Path</th>
+                  <th>Status</th>
+                  <th>Latency</th>
+                  <th>Size</th>
+                </tr>
+              </thead>
+              <tbody id="activity-tbody">
+                <tr>
+                  <td colspan="7" style="text-align: center; color: var(--text-dim); padding: 32px;">Loading activity...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Documentation Tab View -->
+        <section id="view-docs" class="tab-view" style="display: none;">
+          <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 32px;">
+            <h3 style="font-size: 20px; font-weight: 700; margin-bottom: 16px; color: #fff;">R-Tunnel Android Termux Quickstart</h3>
+            
+            <p style="color: var(--text-muted); font-size: 14px; line-height: 1.7; margin-bottom: 20px;">
+              R-Tunnel is a production-grade, temporary HTTP/HTTPS tunneling service built for Render Web Services and Android Termux.
+              It establishes a persistent outbound WebSocket tunnel to expose local ports without port-forwarding or public IP addresses.
+            </p>
+
+            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 1: Install Node.js in Termux</h4>
+            <div class="code-box">pkg update && pkg install nodejs</div>
+
+            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 2: Install or Clone R-Tunnel Client</h4>
+            <div class="code-box">curl -fsSL https://raw.githubusercontent.com/rajuan/r-tunnel/main/client/install.sh | bash</div>
+
+            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 3: Expose Local Port</h4>
+            <div class="code-box">rtunnel 8080</div>
+
+            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Security Architecture</h4>
+            <p style="color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+              • Strict SSRF Shielding: The Render tunnel server never proxies arbitrary outbound IPs. Client connections forward exclusively to <code>127.0.0.1</code>.<br>
+              • Server-authoritative expiration: Enforced strictly server-side (30m, 1h, 2h, 3h).<br>
+              • Binary body integrity: Automatic Base64 transport preserves binary responses (images, media, PDFs).
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="mobile-bottom-nav">
+      <button class="mobile-nav-item active" data-tab="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <span>Overview</span>
+      </button>
+      <button class="mobile-nav-item" onclick="window.openCreateModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+        <span>Create</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="activity">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        <span>Activity</span>
+      </button>
+      <button class="mobile-nav-item" data-tab="docs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+        <span>Docs</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Modal: Create Tunnel Form -->
+  <div id="modal-create-tunnel" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Create Temporary Tunnel</h3>
+        <button class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <form id="create-tunnel-form">
+        <div class="form-group">
+          <label class="form-label" for="input-local-port">Local Port (on Android/Termux)</label>
+          <input type="number" id="input-local-port" class="form-input" placeholder="e.g. 8080, 3000, 5000" min="1" max="65535" required value="8080">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Lifetime Duration</label>
+          <div class="duration-selector">
+            <button type="button" class="duration-btn" data-seconds="1800">30 Mins</button>
+            <button type="button" class="duration-btn selected" data-seconds="3600">1 Hour</button>
+            <button type="button" class="duration-btn" data-seconds="7200">2 Hours</button>
+            <button type="button" class="duration-btn" data-seconds="10800">3 Hours</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="input-tunnel-label">Tunnel Label (Optional)</label>
+          <input type="text" id="input-tunnel-label" class="form-input" placeholder="e.g. Test Server, Flask API">
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
+          <button type="submit" id="btn-submit-create" class="btn btn-primary">Create Tunnel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Terminal Command Generator (Generated after creation) -->
+  <div id="modal-command-ready" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="status-badge badge-connected">TUNNEL CREATED</span>
+          <h3 class="modal-title">Ready in Termux</h3>
+        </div>
+        <button class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Public URL</div>
+        <div class="tunnel-url-box" style="margin-bottom: 12px;">
+          <a id="cmd-public-url" href="#" target="_blank" rel="noopener noreferrer" class="tunnel-url-link">https://...</a>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-bottom: 16px;">
+          <div><span style="color: var(--text-dim);">Target:</span> <strong id="cmd-local-target" style="font-family: var(--font-mono);">127.0.0.1:8080</strong></div>
+          <div><span style="color: var(--text-dim);">Lifetime:</span> <strong id="cmd-duration" style="font-family: var(--font-mono);">01:00:00</strong></div>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Run in Android Termux:</div>
+        <div class="code-box" id="cmd-code-text">rtunnel create ...</div>
+      </div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
+        <button type="button" class="btn btn-secondary modal-close-btn">Done</button>
+        <button type="button" class="btn btn-primary" onclick="window.copyCommandCode()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          Copy Command
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Extend Tunnel Duration -->
+  <div id="modal-extend-tunnel" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Extend Tunnel Duration</h3>
+        <button class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <form id="extend-tunnel-form">
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Extending: <strong id="extend-tunnel-name" style="color: var(--text-main);"></strong>
+        </p>
+
+        <div class="form-group">
+          <label class="form-label" for="extend-duration-select">Add Extra Duration</label>
+          <select id="extend-duration-select" class="form-select">
+            <option value="1800">+30 Minutes</option>
+            <option value="3600" selected>+1 Hour</option>
+            <option value="7200">+2 Hours</option>
+            <option value="10800">+3 Hours</option>
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
+          <button type="submit" id="btn-submit-extend" class="btn btn-primary">Extend Lifetime</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script type="module" src="/js/dashboard.js"></script>
+</body>
+</html>

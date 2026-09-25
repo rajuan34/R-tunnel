@@ -1,0 +1,21 @@
+{
+  "name": "rtunnel-client",
+  "version": "1.0.0",
+  "description": "Android Termux client for R-Tunnel temporary HTTP/HTTPS tunneling service",
+  "type": "module",
+  "bin": {
+    "rtunnel": "./bin/rtunnel.js"
+  },
+  "scripts": {
+    "start": "node ./bin/rtunnel.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.14"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
