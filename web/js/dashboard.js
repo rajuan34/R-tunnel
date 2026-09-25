@@ -9,16 +9,21 @@ import {
 } from './common.js';
 
 let tunnels = [];
+let clientTokens = [];
+let activityLogs = [];
 let systemStats = null;
 let activeTab = 'dashboard';
 let ws = null;
 let currentExtendTunnelId = null;
+let tunnelSearchQuery = '';
+let tunnelStatusFilter = 'all';
 
 // Initialize Dashboard
 document.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
   setupModals();
   setupForms();
+  setupFilters();
 
   const authOk = await checkAuth();
   if (!authOk) {
@@ -31,6 +36,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Run countdown ticker every second
   setInterval(updateCountdowns, 1000);
+  // Auto refresh stats & tokens every 15s
+  setInterval(() => {
+    loadStats();
+    if (activeTab === 'tokens') loadTokens();
+  }, 15000);
 });
 
 // Authentication check
@@ -61,13 +71,30 @@ function setupNavigation() {
     });
   });
 
-  // Mobile menu toggle
+  // Mobile menu toggle & drawer overlay
   const mobileBtn = document.getElementById('mobile-menu-btn');
-  const sidebar = document.querySelector('.sidebar');
+  const sidebar = document.getElementById('app-sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+
+  const closeSidebar = () => {
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('active');
+  };
+
   if (mobileBtn && sidebar) {
     mobileBtn.addEventListener('click', () => {
-      sidebar.classList.toggle('mobile-open');
+      const isOpen = sidebar.classList.contains('mobile-open');
+      if (isOpen) {
+        closeSidebar();
+      } else {
+        sidebar.classList.add('mobile-open');
+        if (overlay) overlay.classList.add('active');
+      }
     });
+  }
+
+  if (overlay) {
+    overlay.addEventListener('click', closeSidebar);
   }
 
   // Logout button
@@ -79,12 +106,34 @@ function setupNavigation() {
       window.location.replace('/login');
     });
   }
+
+  // Activity Refresh Button
+  const refreshBtn = document.getElementById('btn-refresh-activity');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      await loadActivity();
+      showToast('Activity stream updated', 'info');
+    });
+  }
 }
 
 function switchTab(tabId) {
   activeTab = tabId;
 
-  // Update active links
+  // Update page header title
+  const topTitle = document.getElementById('top-title');
+  if (topTitle) {
+    switch (tabId) {
+      case 'dashboard': topTitle.textContent = 'Tunnel Overview'; break;
+      case 'tunnels': topTitle.textContent = 'Active Tunnels'; break;
+      case 'tokens': topTitle.textContent = 'Access Tokens'; break;
+      case 'activity': topTitle.textContent = 'Traffic Inspector'; break;
+      case 'docs': topTitle.textContent = 'Documentation'; break;
+      default: topTitle.textContent = 'R-Tunnel Cloud';
+    }
+  }
+
+  // Update active links across sidebar and bottom navigation
   document.querySelectorAll('[data-tab]').forEach((el) => {
     if (el.getAttribute('data-tab') === tabId) {
       el.classList.add('active');
@@ -103,17 +152,42 @@ function switchTab(tabId) {
   });
 
   // Close mobile sidebar if open
-  const sidebar = document.querySelector('.sidebar');
+  const sidebar = document.getElementById('app-sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
   if (sidebar) sidebar.classList.remove('mobile-open');
+  if (overlay) overlay.classList.remove('active');
 
   if (tabId === 'activity') {
     loadActivity();
+  } else if (tabId === 'tokens') {
+    loadTokens();
+  } else if (tabId === 'tunnels') {
+    renderTunnels();
+  }
+}
+
+// Search and Filter controls
+function setupFilters() {
+  const searchInput = document.getElementById('tunnel-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      tunnelSearchQuery = e.target.value.toLowerCase().trim();
+      renderTunnels();
+    });
+  }
+
+  const statusFilter = document.getElementById('tunnel-status-filter');
+  if (statusFilter) {
+    statusFilter.addEventListener('change', (e) => {
+      tunnelStatusFilter = e.target.value;
+      renderTunnels();
+    });
   }
 }
 
 // Initial Data Fetch
 async function loadInitialData() {
-  await Promise.all([loadStats(), loadTunnels(), loadActivity()]);
+  await Promise.all([loadStats(), loadTunnels(), loadActivity(), loadTokens()]);
 }
 
 async function loadStats() {
@@ -137,17 +211,29 @@ async function loadTunnels() {
   } catch {}
 }
 
-async function loadActivity() {
+async function loadTokens() {
   try {
-    const res = await fetchWithAuth('/api/activity?limit=50');
+    const res = await fetchWithAuth('/api/tokens');
     if (res.ok) {
       const data = await res.json();
-      renderActivity(data.activity || []);
+      clientTokens = data.tokens || [];
+      renderTokens();
     }
   } catch {}
 }
 
-// Render Stats Cards
+async function loadActivity() {
+  try {
+    const res = await fetchWithAuth('/api/activity?limit=60');
+    if (res.ok) {
+      const data = await res.json();
+      activityLogs = data.activity || [];
+      renderActivity(activityLogs);
+    }
+  } catch {}
+}
+
+// Render Stats Cards & Technical Telemetry
 function renderStats() {
   if (!systemStats) return;
   const setVal = (id, val) => {
@@ -159,95 +245,194 @@ function renderStats() {
   setVal('stat-total-requests', systemStats.totalRequests.toLocaleString());
   setVal('stat-bandwidth', formatBytes(systemStats.totalBytesIn + systemStats.totalBytesOut));
   setVal('stat-connected-clients', systemStats.connectedClients);
+
+  // Technical Telemetry Strip
+  setVal('stat-avg-latency', `${systemStats.avgLatencyMs || 0} ms`);
+  setVal('stat-uptime', formatDuration(systemStats.uptimeSeconds || 0));
+  setVal('stat-memory', `${systemStats.memoryUsageMb || 0} MB`);
+  setVal('stat-max-body', `${systemStats.maxBodySizeMb || 10} MB`);
+
+  const quotaEl = document.getElementById('stat-quota-text');
+  if (quotaEl) {
+    quotaEl.textContent = `Quota: ${systemStats.activeTunnels} / ${systemStats.maxActiveTunnels || 5} concurrent`;
+  }
 }
 
-// Render Tunnels Grid
+// Render Tunnels Grid (supports search and filter)
 function renderTunnels() {
-  const container = document.getElementById('tunnels-container');
+  const containerPrimary = document.getElementById('tunnels-container');
+  const containerSecondary = document.getElementById('tunnels-container-secondary');
   const countBadge = document.getElementById('active-tunnels-count');
-  if (!container) return;
 
-  const activeTunnels = tunnels.filter((t) => t.status !== 'expired' && t.expiresAt > Date.now());
+  const now = Date.now();
+  let filtered = tunnels.slice();
+
+  // Search filter
+  if (tunnelSearchQuery) {
+    filtered = filtered.filter(
+      (t) =>
+        t.id.toLowerCase().includes(tunnelSearchQuery) ||
+        (t.label && t.label.toLowerCase().includes(tunnelSearchQuery)) ||
+        String(t.localPort).includes(tunnelSearchQuery)
+    );
+  }
+
+  // Status dropdown filter
+  if (tunnelStatusFilter !== 'all') {
+    filtered = filtered.filter((t) => {
+      if (tunnelStatusFilter === 'expired') {
+        return t.status === 'expired' || t.expiresAt <= now;
+      }
+      return t.status === tunnelStatusFilter && t.expiresAt > now;
+    });
+  }
+
+  const activeTunnels = tunnels.filter((t) => t.status !== 'expired' && t.expiresAt > now);
   if (countBadge) countBadge.textContent = activeTunnels.length;
 
-  if (activeTunnels.length === 0) {
-    container.innerHTML = `
-      <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1px dashed var(--border-muted); border-radius: var(--radius-md); padding: 48px; text-align: center;">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-dim); margin-bottom: 12px;">
+  const html = filtered.length === 0
+    ? `
+      <div style="grid-column: 1 / -1; background: var(--bg-surface); border: 1px dashed var(--border-muted); border-radius: var(--radius-md); padding: 48px 24px; text-align: center;">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--text-dim); margin-bottom: 12px;">
           <circle cx="12" cy="12" r="10"></circle>
           <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
         </svg>
-        <h3 style="color: var(--text-main); font-size: 16px; margin-bottom: 6px;">No Active Tunnels</h3>
-        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 18px;">Click "Create Tunnel" to expose a local port via Android Termux.</p>
-        <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">Create Tunnel</button>
+        <h3 style="color: var(--text-main); font-size: 15px; margin-bottom: 4px;">No Tunnels Found</h3>
+        <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
+          ${tunnelSearchQuery ? 'No active tunnels match your filter criteria.' : 'Create a temporary tunnel to expose your Android Termux local server.'}
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">Create New Tunnel</button>
       </div>
-    `;
+    `
+    : filtered
+        .map((t) => {
+          const remainingSec = Math.max(0, Math.floor((t.expiresAt - now) / 1000));
+          const remainingStr = formatDuration(remainingSec);
+          const isExpiring = remainingSec <= 300 && remainingSec > 0;
+          const isExpired = t.status === 'expired' || remainingSec === 0;
+
+          let statusClass = `badge-${t.status}`;
+          let statusText = t.status.toUpperCase();
+
+          if (isExpired) {
+            statusClass = 'badge-expired';
+            statusText = 'EXPIRED';
+          } else if (isExpiring) {
+            statusClass = 'badge-expiring';
+            statusText = 'EXPIRING';
+          }
+
+          return `
+          <div class="tunnel-card" id="tunnel-card-${t.id}">
+            <div class="tunnel-card-top">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                  <span class="tunnel-id-badge">${escapeHtml(t.id)}</span>
+                  <span class="status-badge ${statusClass}">${statusText}</span>
+                </div>
+                <h4 style="font-size: 14px; font-weight: 700; color: var(--text-main); letter-spacing: -0.2px;">
+                  ${escapeHtml(t.label || 'Tunnel Endpoint')}
+                </h4>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="window.copyText('${t.publicUrl}')" title="Copy Public URL">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+            </div>
+
+            <div class="tunnel-url-box">
+              <a href="${t.publicUrl}" target="_blank" rel="noopener noreferrer" class="tunnel-url-link">
+                ${escapeHtml(t.publicUrl)}
+              </a>
+            </div>
+
+            <div class="tunnel-details">
+              <div class="detail-item">
+                <span class="detail-key">Target Port</span>
+                <span class="detail-val">127.0.0.1:${t.localPort}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-key">Expires In</span>
+                <span class="detail-val" id="countdown-${t.id}" style="${isExpiring ? 'color: #f97316;' : ''}">
+                  ${isExpired ? '00:00:00' : remainingStr}
+                </span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-key">Requests</span>
+                <span class="detail-val">${t.requestCount.toLocaleString()}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-key">Payload Vol.</span>
+                <span class="detail-val">${formatBytes(t.bytesIn + t.bytesOut)}</span>
+              </div>
+            </div>
+
+            <div class="tunnel-card-actions">
+              <a href="${t.publicUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="flex: 1;">
+                Open URL
+              </a>
+              ${
+                !isExpired
+                  ? `
+                <button class="btn btn-secondary btn-sm" onclick="window.openExtendModal('${t.id}')">
+                  Extend
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="window.stopTunnel('${t.id}')">
+                  Stop
+                </button>
+              `
+                  : `
+                <span style="font-size: 11px; color: var(--text-dim); padding: 4px 8px;">Terminated</span>
+              `
+              }
+            </div>
+          </div>
+        `;
+        })
+        .join('');
+
+  if (containerPrimary) containerPrimary.innerHTML = html;
+  if (containerSecondary) containerSecondary.innerHTML = html;
+}
+
+// Render Tokens Table
+function renderTokens() {
+  const tbody = document.getElementById('tokens-tbody');
+  if (!tbody) return;
+
+  const now = Date.now();
+  if (clientTokens.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 32px;">No active client tokens generated yet. Click "+ Generate Token" to issue one.</td></tr>`;
     return;
   }
 
-  container.innerHTML = activeTunnels
-    .map((t) => {
-      const remainingSec = Math.max(0, Math.floor((t.expiresAt - Date.now()) / 1000));
+  tbody.innerHTML = clientTokens
+    .map((tk) => {
+      const remainingSec = Math.max(0, Math.floor((tk.expiresAt - now) / 1000));
       const remainingStr = formatDuration(remainingSec);
-      const isExpiring = remainingSec <= 300;
-      const statusClass = isExpiring ? 'badge-expiring' : `badge-${t.status}`;
-      const statusText = isExpiring ? 'EXPIRING' : t.status.toUpperCase();
+      const isExpired = remainingSec === 0;
 
       return `
-      <div class="tunnel-card" id="tunnel-card-${t.id}">
-        <div class="tunnel-card-top">
-          <div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-              <span class="tunnel-id-badge">${t.id}</span>
-              <span class="status-badge ${statusClass}">${statusText}</span>
-            </div>
-            <h4 style="font-size: 14px; font-weight: 600; color: var(--text-main);">${escapeHtml(t.label || 'Tunnel')}</h4>
-          </div>
-          <button class="btn btn-secondary btn-sm" onclick="window.copyText('${t.publicUrl}')" title="Copy Public URL">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
+      <tr>
+        <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan);">
+          ${escapeHtml(tk.token.substring(0, 10))}••••${escapeHtml(tk.token.substring(tk.token.length - 6))}
+          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; margin-left: 6px; font-size: 10px;" onclick="window.copyText('${tk.token}', 'Token copied!')">
+            Copy
           </button>
-        </div>
-
-        <div class="tunnel-url-box">
-          <a href="${t.publicUrl}" target="_blank" rel="noopener noreferrer" class="tunnel-url-link">
-            ${escapeHtml(t.publicUrl)}
-          </a>
-        </div>
-
-        <div class="tunnel-details">
-          <div class="detail-item">
-            <span class="detail-key">Local Target</span>
-            <span class="detail-val">127.0.0.1:${t.localPort}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-key">Expires In</span>
-            <span class="detail-val" id="countdown-${t.id}" style="${isExpiring ? 'color: #f97316;' : ''}">${remainingStr}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-key">Requests</span>
-            <span class="detail-val">${t.requestCount.toLocaleString()}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-key">Traffic</span>
-            <span class="detail-val">${formatBytes(t.bytesIn + t.bytesOut)}</span>
-          </div>
-        </div>
-
-        <div class="tunnel-card-actions">
-          <a href="${t.publicUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="flex: 1;">
-            Open URL
-          </a>
-          <button class="btn btn-secondary btn-sm" onclick="window.openExtendModal('${t.id}')">
-            Extend
+        </td>
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-main);">${escapeHtml(tk.label || 'Default')}</td>
+        <td style="font-size: 12px; color: var(--text-muted);">${formatRelativeTime(tk.createdAt)}</td>
+        <td style="font-family: var(--font-mono); font-size: 12px; color: ${isExpired ? 'var(--status-expired)' : 'var(--text-main)'};">
+          ${isExpired ? 'Expired' : remainingStr}
+        </td>
+        <td style="text-align: right;">
+          <button class="btn btn-danger btn-sm" onclick="window.revokeToken('${tk.token}')" style="padding: 3px 8px; font-size: 11px;">
+            Revoke
           </button>
-          <button class="btn btn-danger btn-sm" onclick="window.stopTunnel('${t.id}')">
-            Stop
-          </button>
-        </div>
-      </div>
+        </td>
+      </tr>
     `;
     })
     .join('');
@@ -259,7 +444,7 @@ function renderActivity(entries) {
   if (!tbody) return;
 
   if (entries.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 32px;">No recent request activity recorded.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: 32px;">No recent request traffic recorded.</td></tr>`;
     return;
   }
 
@@ -299,7 +484,7 @@ function updateCountdowns() {
     const countdownEl = document.getElementById(`countdown-${t.id}`);
     if (countdownEl) {
       countdownEl.textContent = formatDuration(remainingSec);
-      if (remainingSec <= 300) {
+      if (remainingSec <= 300 && remainingSec > 0) {
         countdownEl.style.color = '#f97316';
       }
     }
@@ -359,10 +544,10 @@ function initWebSocket() {
           break;
         }
         case 'activity_logged': {
-          // Prepend to activity log if visible
-          const tbody = document.getElementById('activity-tbody');
-          if (tbody) {
-            loadActivity();
+          activityLogs.unshift(data);
+          if (activityLogs.length > 60) activityLogs.pop();
+          if (activeTab === 'activity') {
+            renderActivity(activityLogs);
           }
           loadStats();
           break;
@@ -377,7 +562,6 @@ function initWebSocket() {
       indicator.innerHTML = '<span class="status-dot" style="background: #f59e0b;"></span><span>RECONNECTING...</span>';
       indicator.style.color = '#f59e0b';
     }
-    // Auto reconnect
     setTimeout(initWebSocket, 3000);
   };
 }
@@ -440,10 +624,7 @@ function setupForms() {
           return;
         }
 
-        // Close create modal
         document.getElementById('modal-create-tunnel').classList.remove('open');
-
-        // Open command generator modal with generated Termux command
         showCommandModal(data.tunnel, data.cliCommand);
         await loadTunnels();
         await loadStats();
@@ -490,6 +671,41 @@ function setupForms() {
       }
     });
   }
+
+  // Generate Token Form Submit
+  const tokenForm = document.getElementById('generate-token-form');
+  if (tokenForm) {
+    tokenForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const label = document.getElementById('input-token-label').value.trim();
+      const durationSeconds = parseInt(document.getElementById('select-token-duration').value, 10);
+
+      const submitBtn = document.getElementById('btn-submit-token');
+      submitBtn.disabled = true;
+
+      try {
+        const res = await fetchWithAuth('/api/tokens/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, durationSeconds }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Failed to generate token', 'error');
+          return;
+        }
+
+        showToast('Client token created successfully!', 'success');
+        document.getElementById('modal-generate-token').classList.remove('open');
+        await loadTokens();
+      } catch {
+        showToast('Network error generating token', 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function showCommandModal(tunnel, cliCommand) {
@@ -505,9 +721,13 @@ function showCommandModal(tunnel, cliCommand) {
   modal.classList.add('open');
 }
 
-// Global actions exposed to window for inline onclick attributes
+// Global actions exposed to window
 window.openCreateModal = () => {
   document.getElementById('modal-create-tunnel').classList.add('open');
+};
+
+window.openTokenModal = () => {
+  document.getElementById('modal-generate-token').classList.add('open');
 };
 
 window.openExtendModal = (tunnelId) => {
@@ -520,13 +740,13 @@ window.openExtendModal = (tunnelId) => {
 };
 
 window.stopTunnel = async (tunnelId) => {
-  if (!confirm(`Are you sure you want to stop tunnel ${tunnelId}? This will immediately terminate the connection.`)) {
+  if (!confirm(`Are you sure you want to stop tunnel ${tunnelId}? This will terminate all active connections.`)) {
     return;
   }
   try {
     const res = await fetchWithAuth(`/api/tunnels/${tunnelId}/stop`, { method: 'POST' });
     if (res.ok) {
-      showToast(`Tunnel ${tunnelId} stopped`, 'info');
+      showToast(`Tunnel ${tunnelId} terminated`, 'info');
       await loadTunnels();
       await loadStats();
     } else {
@@ -538,13 +758,58 @@ window.stopTunnel = async (tunnelId) => {
   }
 };
 
-window.copyText = (text) => {
-  copyToClipboard(text, 'URL copied to clipboard!');
+window.revokeToken = async (token) => {
+  if (!confirm('Are you sure you want to revoke this client token? Devices using it will be disconnected.')) {
+    return;
+  }
+  try {
+    const res = await fetchWithAuth(`/api/tokens/${encodeURIComponent(token)}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Token revoked successfully', 'info');
+      await loadTokens();
+    } else {
+      showToast('Failed to revoke token', 'error');
+    }
+  } catch {
+    showToast('Network error revoking token', 'error');
+  }
+};
+
+window.copyText = (text, message = 'Copied to clipboard!') => {
+  copyToClipboard(text, message);
 };
 
 window.copyCommandCode = () => {
   const code = document.getElementById('cmd-code-text').textContent;
   copyToClipboard(code, 'Termux command copied to clipboard!');
+};
+
+window.exportActivityCSV = () => {
+  if (activityLogs.length === 0) {
+    showToast('No activity logs available to export', 'info');
+    return;
+  }
+
+  const headers = ['Timestamp', 'TunnelId', 'Method', 'Path', 'StatusCode', 'LatencyMs', 'ResponseSizeBytes'];
+  const rows = activityLogs.map((item) => [
+    new Date(item.timestamp).toISOString(),
+    item.tunnelId,
+    item.method,
+    `"${item.path.replace(/"/g, '""')}"`,
+    item.statusCode,
+    item.latencyMs,
+    item.responseSizeBytes,
+  ]);
+
+  const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `r-tunnel-traffic-${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  showToast('Activity CSV exported', 'success');
 };
 
 function escapeHtml(str) {

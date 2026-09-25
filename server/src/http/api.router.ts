@@ -251,3 +251,25 @@ apiRouter.post('/api/tokens/generate', requireCsrf, async (req: Request, res: Re
   const token = authService.createEphemeralClientToken(durationSeconds, label);
   res.json({ token, expiresAt: Date.now() + durationSeconds * 1000 });
 });
+
+/**
+ * List active ephemeral client tokens
+ * GET /api/tokens
+ */
+apiRouter.get('/api/tokens', (req: Request, res: Response) => {
+  const tokens = authService.listClientTokens();
+  res.json({ tokens });
+});
+
+/**
+ * Revoke client token
+ * DELETE /api/tokens/:token
+ */
+apiRouter.delete('/api/tokens/:token', requireCsrf, (req: Request, res: Response) => {
+  const success = authService.revokeClientToken(req.params.token);
+  if (!success) {
+    res.status(404).json({ error: 'Token not found or already expired' });
+    return;
+  }
+  res.json({ success: true, message: 'Token revoked' });
+});

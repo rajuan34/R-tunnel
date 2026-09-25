@@ -424,6 +424,14 @@ export class TunnelManager {
       }
     }
 
+    const recentActivity = await this.store.getActivity(20);
+    const avgLatencyMs = recentActivity.length > 0
+      ? Math.round(recentActivity.reduce((acc, cur) => acc + cur.latencyMs, 0) / recentActivity.length)
+      : 0;
+
+    const mem = process.memoryUsage();
+    const memoryUsageMb = Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10;
+
     return {
       activeTunnels,
       totalRequests,
@@ -432,6 +440,11 @@ export class TunnelManager {
       connectedClients: this.clientSockets.size,
       uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1000),
       serverTime: Date.now(),
+      avgLatencyMs,
+      maxActiveTunnels: config.maxActiveTunnels,
+      maxDurationHours: Math.round(config.maxTunnelDuration / 3600),
+      maxBodySizeMb: Math.round(config.maxBodySize / (1024 * 1024)),
+      memoryUsageMb,
     };
   }
 

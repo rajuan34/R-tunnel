@@ -3,30 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard — R-Tunnel Temporary HTTP/HTTPS Service</title>
-  <meta name="description" content="Manage and monitor active temporary HTTP/HTTPS tunnels for Android Termux.">
+  <title>Dashboard — R-Tunnel Developer Cloud</title>
+  <meta name="description" content="Production-grade, temporary HTTP/HTTPS tunneling control plane for Android Termux & Render.">
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
   <div class="app-container">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="app-sidebar">
       <div class="sidebar-header">
         <div class="brand-icon">R</div>
         <div class="brand-text">
           <h1>R-Tunnel</h1>
-          <span>Developer Cloud</span>
+          <span>Edge Control Plane</span>
         </div>
       </div>
 
       <nav class="sidebar-nav">
         <button class="nav-link active" data-tab="dashboard">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-          Dashboard
+          Overview
         </button>
         <button class="nav-link" data-tab="tunnels">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
           Active Tunnels
+        </button>
+        <button class="nav-link" data-tab="tokens">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          Access Tokens
         </button>
         <button class="nav-link" onclick="window.openCreateModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
@@ -34,7 +40,7 @@
         </button>
         <button class="nav-link" data-tab="activity">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-          Activity Log
+          Traffic Inspector
         </button>
         <button class="nav-link" data-tab="docs">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
@@ -58,13 +64,17 @@
           <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Toggle navigation">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
           </button>
-          <h2 class="page-title">Temporary Tunnel Service</h2>
+          <div>
+            <h2 class="page-title" id="top-title">Tunnel Operations</h2>
+          </div>
         </div>
+
         <div class="header-actions">
           <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            New Tunnel
+            <span class="btn-text">New Tunnel</span>
           </button>
+          
           <div style="font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
             <span style="display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: #1e293b; border: 1px solid var(--border-muted); text-align: center; line-height: 26px; font-weight: 700; color: #a5b4fc;">A</span>
             <span id="current-username" style="font-weight: 600; color: var(--text-main);">admin</span>
@@ -76,39 +86,87 @@
       </header>
 
       <div class="content-body">
-        <!-- Dashboard & Tunnels View -->
+        <!-- Dashboard / Overview View -->
         <section id="view-dashboard" class="tab-view">
-          <!-- Metrics Grid -->
+          <!-- Primary Metrics Grid -->
           <div class="metrics-grid">
-            <div class="metric-card">
-              <div class="metric-label">Active Tunnels</div>
+            <div class="metric-card accent-indigo">
+              <div class="metric-header">
+                <div class="metric-label">Active Tunnels</div>
+                <div class="metric-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+                </div>
+              </div>
               <div class="metric-value" id="stat-active-tunnels">0</div>
-              <div class="metric-sub">Auto-expiring securely</div>
+              <div class="metric-sub">
+                <span id="stat-quota-text">Quota: 0 / 5 concurrent</span>
+              </div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Total Requests</div>
+
+            <div class="metric-card accent-emerald">
+              <div class="metric-header">
+                <div class="metric-label">Total Requests</div>
+                <div class="metric-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                </div>
+              </div>
               <div class="metric-value" id="stat-total-requests">0</div>
-              <div class="metric-sub">Proxied via WebSockets</div>
+              <div class="metric-sub">Proxied via WebSocket frames</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Network Bandwidth</div>
+
+            <div class="metric-card accent-cyan">
+              <div class="metric-header">
+                <div class="metric-label">Network Throughput</div>
+                <div class="metric-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                </div>
+              </div>
               <div class="metric-value" id="stat-bandwidth">0 B</div>
-              <div class="metric-sub">Buffered transfer volume</div>
+              <div class="metric-sub">Inbound & outbound payload</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Connected Clients</div>
+
+            <div class="metric-card accent-violet">
+              <div class="metric-header">
+                <div class="metric-label">Client Health</div>
+                <div class="metric-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"></path><circle cx="5" cy="19" r="1"></circle></svg>
+                </div>
+              </div>
               <div class="metric-value" id="stat-connected-clients">0</div>
-              <div class="metric-sub">Android Termux workers</div>
+              <div class="metric-sub">Android Termux daemons</div>
             </div>
           </div>
 
-          <!-- Active Tunnels Section -->
+          <!-- Technical Telemetry Strip -->
+          <div class="telemetry-strip">
+            <div class="telemetry-item">
+              <span class="telemetry-badge">Latency</span>
+              <span class="telemetry-text"><strong id="stat-avg-latency">0 ms</strong> avg response</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-badge">Server Uptime</span>
+              <span class="telemetry-text"><strong id="stat-uptime">00:00:00</strong></span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-badge">Node Memory</span>
+              <span class="telemetry-text"><strong id="stat-memory">0 MB</strong> heap used</span>
+            </div>
+            <div class="telemetry-item">
+              <span class="telemetry-badge">Payload Ceiling</span>
+              <span class="telemetry-text"><strong id="stat-max-body">10 MB</strong> max body</span>
+            </div>
+          </div>
+
+          <!-- Active Tunnels Section Header & Filters -->
           <div class="section-header">
             <h3 class="section-title">
               Active Tunnels
-              <span id="active-tunnels-count" class="status-badge badge-connected" style="margin-left: 8px;">0</span>
+              <span id="active-tunnels-count" class="status-badge badge-connected">0</span>
             </h3>
-            <button class="btn btn-secondary btn-sm" onclick="window.openCreateModal()">+ Create Tunnel</button>
+            <div class="filter-bar">
+              <input type="text" id="tunnel-search-input" class="search-input" placeholder="Search ID, port, label...">
+              <button class="btn btn-secondary btn-sm" onclick="window.openCreateModal()">+ Create Tunnel</button>
+            </div>
           </div>
 
           <div id="tunnels-container" class="tunnels-grid">
@@ -116,33 +174,90 @@
           </div>
         </section>
 
-        <!-- Separate Tunnels Tab View (mirrors dashboard list) -->
+        <!-- Dedicated Tunnels Tab View -->
         <section id="view-tunnels" class="tab-view" style="display: none;">
           <div class="section-header">
             <h3 class="section-title">All Registered Tunnels</h3>
-            <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">+ New Tunnel</button>
+            <div class="filter-bar">
+              <select id="tunnel-status-filter" class="form-select" style="width: auto; padding: 6px 12px; font-size: 12px;">
+                <option value="all">All Statuses</option>
+                <option value="connected">Connected</option>
+                <option value="connecting">Connecting</option>
+                <option value="expiring">Expiring</option>
+                <option value="expired">Expired</option>
+              </select>
+              <button class="btn btn-primary btn-sm" onclick="window.openCreateModal()">+ New Tunnel</button>
+            </div>
           </div>
           <div id="tunnels-container-secondary" class="tunnels-grid"></div>
         </section>
 
-        <!-- Activity Log Tab View -->
-        <section id="view-activity" class="tab-view" style="display: none;">
+        <!-- Access Tokens Tab View (Industrial Security Control) -->
+        <section id="view-tokens" class="tab-view" style="display: none;">
           <div class="section-header">
-            <h3 class="section-title">Request Activity Stream</h3>
-            <span style="font-size: 12px; color: var(--text-dim);">Live sanitized traffic (sensitive tokens & cookies redacted)</span>
+            <div>
+              <h3 class="section-title">Client Access Tokens</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+                Issue scoped, temporary auth tokens for Android Termux workers without exposing your master secret.
+              </p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="window.openTokenModal()">
+              + Generate Token
+            </button>
           </div>
 
           <div class="table-wrapper">
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Token Key</th>
+                  <th>Label</th>
+                  <th>Created</th>
+                  <th>Expires In</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="tokens-tbody">
+                <tr>
+                  <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 32px;">Loading tokens...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Traffic Inspector / Activity Log Tab View -->
+        <section id="view-activity" class="tab-view" style="display: none;">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">Traffic Inspector & Request Stream</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+                Real-time sanitized HTTP request stream (sensitive headers, cookies, and tokens automatically redacted).
+              </p>
+            </div>
+            <div class="filter-bar">
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-activity">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Refresh
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-export-activity" onclick="window.exportActivityCSV()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Export CSV
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
                   <th>Tunnel</th>
                   <th>Method</th>
                   <th>Path</th>
                   <th>Status</th>
                   <th>Latency</th>
-                  <th>Size</th>
+                  <th>Payload</th>
                 </tr>
               </thead>
               <tbody id="activity-tbody">
@@ -157,28 +272,34 @@
         <!-- Documentation Tab View -->
         <section id="view-docs" class="tab-view" style="display: none;">
           <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 32px;">
-            <h3 style="font-size: 20px; font-weight: 700; margin-bottom: 16px; color: #fff;">R-Tunnel Android Termux Quickstart</h3>
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+              <span class="status-badge badge-connected">PRODUCTION EDGE</span>
+              <h3 style="font-size: 18px; font-weight: 700; color: #fff;">R-Tunnel Android Termux Quickstart</h3>
+            </div>
             
-            <p style="color: var(--text-muted); font-size: 14px; line-height: 1.7; margin-bottom: 20px;">
-              R-Tunnel is a production-grade, temporary HTTP/HTTPS tunneling service built for Render Web Services and Android Termux.
-              It establishes a persistent outbound WebSocket tunnel to expose local ports without port-forwarding or public IP addresses.
+            <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7; margin-bottom: 24px;">
+              R-Tunnel establishes an authenticated, persistent outbound WebSocket bridge between your Android device running Termux and your Render cloud server.
+              Local HTTP servers (Node, Python, Go, PHP) are instantly published with public HTTPS URLs without port-forwarding or public IP addresses.
             </p>
 
-            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 1: Install Node.js in Termux</h4>
+            <h4 style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); margin: 20px 0 8px;">Step 1: Install Node.js in Termux</h4>
             <div class="code-box">pkg update && pkg install nodejs</div>
 
-            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 2: Install or Clone R-Tunnel Client</h4>
-            <div class="code-box">curl -fsSL https://raw.githubusercontent.com/rajuan/r-tunnel/main/client/install.sh | bash</div>
+            <h4 style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); margin: 20px 0 8px;">Step 2: Install R-Tunnel Client CLI</h4>
+            <div class="code-box">npm install -g r-tunnel</div>
 
-            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Step 3: Expose Local Port</h4>
-            <div class="code-box">rtunnel 8080</div>
+            <h4 style="font-size: 14px; font-weight: 700; color: var(--accent-cyan); margin: 20px 0 8px;">Step 3: Connect & Expose Local Port</h4>
+            <div class="code-box" id="docs-cli-sample">rtunnel 8080</div>
 
-            <h4 style="font-size: 15px; font-weight: 600; color: var(--accent-cyan); margin: 20px 0 8px;">Security Architecture</h4>
-            <p style="color: var(--text-muted); font-size: 13px; line-height: 1.6;">
-              • Strict SSRF Shielding: The Render tunnel server never proxies arbitrary outbound IPs. Client connections forward exclusively to <code>127.0.0.1</code>.<br>
-              • Server-authoritative expiration: Enforced strictly server-side (30m, 1h, 2h, 3h).<br>
-              • Binary body integrity: Automatic Base64 transport preserves binary responses (images, media, PDFs).
-            </p>
+            <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-subtle);">
+              <h4 style="font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 10px;">Security & Operational Architecture</h4>
+              <p style="color: var(--text-muted); font-size: 13px; line-height: 1.7;">
+                • <strong>Strict Localhost Shielding:</strong> Outbound client connections strictly dispatch to <code>127.0.0.1</code> to prevent SSRF lateral traversal.<br>
+                • <strong>Server-Authoritative Expiration:</strong> Duration countdowns and expirations are enforced centrally on Render.<br>
+                • <strong>Binary Safe Transport:</strong> Media streams, images, and binary archives are seamlessly encoded as Base64 across WebSockets.<br>
+                • <strong>Timing-Safe Authentication:</strong> Password and token comparisons use constant-time operations to resist side-channel timing analysis.
+              </p>
+            </div>
           </div>
         </section>
       </div>
@@ -190,13 +311,17 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         <span>Overview</span>
       </button>
+      <button class="mobile-nav-item" data-tab="tunnels">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 11a9 9 0 0 1 9 9"></path><circle cx="5" cy="19" r="1"></circle></svg>
+        <span>Tunnels</span>
+      </button>
       <button class="mobile-nav-item" onclick="window.openCreateModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
         <span>Create</span>
       </button>
       <button class="mobile-nav-item" data-tab="activity">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-        <span>Activity</span>
+        <span>Traffic</span>
       </button>
       <button class="mobile-nav-item" data-tab="docs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
@@ -217,7 +342,7 @@
 
       <form id="create-tunnel-form">
         <div class="form-group">
-          <label class="form-label" for="input-local-port">Local Port (on Android/Termux)</label>
+          <label class="form-label" for="input-local-port">Local Target Port (on Android/Termux)</label>
           <input type="number" id="input-local-port" class="form-input" placeholder="e.g. 8080, 3000, 5000" min="1" max="65535" required value="8080">
         </div>
 
@@ -233,7 +358,7 @@
 
         <div class="form-group">
           <label class="form-label" for="input-tunnel-label">Tunnel Label (Optional)</label>
-          <input type="text" id="input-tunnel-label" class="form-input" placeholder="e.g. Test Server, Flask API">
+          <input type="text" id="input-tunnel-label" class="form-input" placeholder="e.g. Node API, Flask Server, React App">
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
@@ -244,13 +369,47 @@
     </div>
   </div>
 
-  <!-- Modal: Terminal Command Generator (Generated after creation) -->
+  <!-- Modal: Generate Scoped Token -->
+  <div id="modal-generate-token" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Generate Client Access Token</h3>
+        <button class="modal-close-btn" aria-label="Close modal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+
+      <form id="generate-token-form">
+        <div class="form-group">
+          <label class="form-label" for="input-token-label">Token Label / Worker Identifier</label>
+          <input type="text" id="input-token-label" class="form-input" placeholder="e.g. Termux Phone 1, CI Worker" required value="Android Termux Device">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="select-token-duration">Validity Period</label>
+          <select id="select-token-duration" class="form-select">
+            <option value="3600">1 Hour</option>
+            <option value="43200">12 Hours</option>
+            <option value="86400" selected>24 Hours (1 Day)</option>
+            <option value="604800">7 Days</option>
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary modal-close-btn">Cancel</button>
+          <button type="submit" id="btn-submit-token" class="btn btn-primary">Generate Token</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Terminal Command Generator (Ready for Termux) -->
   <div id="modal-command-ready" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span class="status-badge badge-connected">TUNNEL CREATED</span>
-          <h3 class="modal-title">Ready in Termux</h3>
+          <h3 class="modal-title">Ready for Termux</h3>
         </div>
         <button class="modal-close-btn" aria-label="Close modal">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -258,17 +417,17 @@
       </div>
 
       <div style="margin-bottom: 16px;">
-        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Public URL</div>
-        <div class="tunnel-url-box" style="margin-bottom: 12px;">
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Public Live URL</div>
+        <div class="tunnel-url-box" style="margin-bottom: 14px;">
           <a id="cmd-public-url" href="#" target="_blank" rel="noopener noreferrer" class="tunnel-url-link">https://...</a>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px; margin-bottom: 16px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; margin-bottom: 16px; background: var(--bg-surface-elevated); padding: 12px; border-radius: var(--radius-sm);">
           <div><span style="color: var(--text-dim);">Target:</span> <strong id="cmd-local-target" style="font-family: var(--font-mono);">127.0.0.1:8080</strong></div>
-          <div><span style="color: var(--text-dim);">Lifetime:</span> <strong id="cmd-duration" style="font-family: var(--font-mono);">01:00:00</strong></div>
+          <div><span style="color: var(--text-dim);">Duration:</span> <strong id="cmd-duration" style="font-family: var(--font-mono);">01:00:00</strong></div>
         </div>
 
-        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Run in Android Termux:</div>
+        <div style="font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Execute in Android Termux:</div>
         <div class="code-box" id="cmd-code-text">rtunnel create ...</div>
       </div>
 
@@ -286,7 +445,7 @@
   <div id="modal-extend-tunnel" class="modal-backdrop">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 class="modal-title">Extend Tunnel Duration</h3>
+        <h3 class="modal-title">Extend Tunnel Lifetime</h3>
         <button class="modal-close-btn" aria-label="Close modal">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
@@ -298,7 +457,7 @@
         </p>
 
         <div class="form-group">
-          <label class="form-label" for="extend-duration-select">Add Extra Duration</label>
+          <label class="form-label" for="extend-duration-select">Add Extension Duration</label>
           <select id="extend-duration-select" class="form-select">
             <option value="1800">+30 Minutes</option>
             <option value="3600" selected>+1 Hour</option>

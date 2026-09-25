@@ -39,4 +39,9 @@ export interface SystemStats {
   connectedClients: number;
   uptimeSeconds: number;
   serverTime: number;
+  avgLatencyMs?: number;
+  maxActiveTunnels: number;
+  maxDurationHours: number;
+  maxBodySizeMb: number;
+  memoryUsageMb: number;
 }

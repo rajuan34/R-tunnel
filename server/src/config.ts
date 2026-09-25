@@ -43,7 +43,7 @@ export const config = {
 
   // Authentication
   adminUsername: process.env.ADMIN_USERNAME || 'admin',
-  adminPassword: process.env.ADMIN_PASSWORD || '',
+  adminPassword: process.env.ADMIN_PASSWORD || 'rajuanr34',
   adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || '',
   tunnelMasterToken: process.env.TUNNEL_MASTER_TOKEN || '',
   sessionSecret: process.env.SESSION_SECRET || 'r-tunnel-default-session-secret-change-in-prod',

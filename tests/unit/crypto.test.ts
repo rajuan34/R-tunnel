@@ -49,6 +49,10 @@ describe('Crypto & ID Generation Utilities', () => {
     const { authService } = await import('../../server/src/auth/auth.service.js');
     const { config } = await import('../../server/src/config.js');
 
+    const originalUser = config.adminUsername;
+    const originalPass = config.adminPassword;
+    const originalHash = config.adminPasswordHash;
+
     config.adminUsername = 'myadmin';
     config.adminPassword = 'plainPassword123';
     config.adminPasswordHash = '';
@@ -58,7 +62,8 @@ describe('Crypto & ID Generation Utilities', () => {
     assert.strictEqual(await authService.verifyAdmin('otheruser', 'plainPassword123'), false);
 
     // Clean up
-    config.adminUsername = 'admin';
-    config.adminPassword = '';
+    config.adminUsername = originalUser;
+    config.adminPassword = originalPass;
+    config.adminPasswordHash = originalHash;
   });
 });

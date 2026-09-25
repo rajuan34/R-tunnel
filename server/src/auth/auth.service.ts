@@ -145,6 +145,27 @@ export class AuthService {
     return token;
   }
 
+  /**
+   * List active client access tokens.
+   */
+  listClientTokens(): ClientTokenInfo[] {
+    const now = Date.now();
+    const result: ClientTokenInfo[] = [];
+    for (const [token, info] of this.clientTokens.entries()) {
+      if (now <= info.expiresAt) {
+        result.push({ ...info });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Revoke an active client token.
+   */
+  revokeClientToken(token: string): boolean {
+    return this.clientTokens.delete(token);
+  }
+
   private cleanup(): void {
     const now = Date.now();
     for (const [token, session] of this.sessions.entries()) {

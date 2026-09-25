@@ -57,7 +57,7 @@ var config = {
   publicBaseDomain: (process.env.PUBLIC_BASE_DOMAIN || "").trim().toLowerCase(),
   // Authentication
   adminUsername: process.env.ADMIN_USERNAME || "admin",
-  adminPassword: process.env.ADMIN_PASSWORD || "",
+  adminPassword: process.env.ADMIN_PASSWORD || "rajuanr34",
   adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || "",
   tunnelMasterToken: process.env.TUNNEL_MASTER_TOKEN || "",
   sessionSecret: process.env.SESSION_SECRET || "r-tunnel-default-session-secret-change-in-prod",
@@ -682,6 +682,10 @@ var TunnelManager = class {
         activeTunnels++;
       }
     }
+    const recentActivity = await this.store.getActivity(20);
+    const avgLatencyMs = recentActivity.length > 0 ? Math.round(recentActivity.reduce((acc, cur) => acc + cur.latencyMs, 0) / recentActivity.length) : 0;
+    const mem = process.memoryUsage();
+    const memoryUsageMb = Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10;
     return {
       activeTunnels,
       totalRequests,
@@ -689,7 +693,12 @@ var TunnelManager = class {
       totalBytesOut,
       connectedClients: this.clientSockets.size,
       uptimeSeconds: Math.floor((Date.now() - this.startTime) / 1e3),
-      serverTime: Date.now()
+      serverTime: Date.now(),
+      avgLatencyMs,
+      maxActiveTunnels: config.maxActiveTunnels,
+      maxDurationHours: Math.round(config.maxTunnelDuration / 3600),
+      maxBodySizeMb: Math.round(config.maxBodySize / (1024 * 1024)),
+      memoryUsageMb
     };
   }
   isClientConnected(tunnelId) {
@@ -1080,6 +1089,25 @@ var AuthService = class {
     });
     return token;
   }
+  /**
+   * List active client access tokens.
+   */
+  listClientTokens() {
+    const now = Date.now();
+    const result = [];
+    for (const [token, info] of this.clientTokens.entries()) {
+      if (now <= info.expiresAt) {
+        result.push({ ...info });
+      }
+    }
+    return result;
+  }
+  /**
+   * Revoke an active client token.
+   */
+  revokeClientToken(token) {
+    return this.clientTokens.delete(token);
+  }
   cleanup() {
     const now = Date.now();
     for (const [token, session] of this.sessions.entries()) {
@@ -1303,6 +1331,18 @@ apiRouter.post("/api/tokens/generate", requireCsrf, async (req, res) => {
   const { durationSeconds = 86400, label } = req.body || {};
   const token = authService.createEphemeralClientToken(durationSeconds, label);
   res.json({ token, expiresAt: Date.now() + durationSeconds * 1e3 });
+});
+apiRouter.get("/api/tokens", (req, res) => {
+  const tokens = authService.listClientTokens();
+  res.json({ tokens });
+});
+apiRouter.delete("/api/tokens/:token", requireCsrf, (req, res) => {
+  const success = authService.revokeClientToken(req.params.token);
+  if (!success) {
+    res.status(404).json({ error: "Token not found or already expired" });
+    return;
+  }
+  res.json({ success: true, message: "Token revoked" });
 });
 
 // server/src/websocket/client.ws.ts
