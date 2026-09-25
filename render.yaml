@@ -3,7 +3,7 @@ services:
     name: r-tunnel
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --legacy-peer-deps && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
@@ -15,6 +15,8 @@ services:
       - key: PUBLIC_BASE_DOMAIN
         sync: false
       - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
         sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
