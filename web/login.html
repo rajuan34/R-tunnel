@@ -62,19 +62,21 @@
       </button>
     </form>
 
-    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-dim); text-align: center;">
-      Configured via Render Environment Variables<br>
-      <code style="font-family: var(--font-mono); color: #94a3b8;">ADMIN_USERNAME / ADMIN_PASSWORD</code>
+    <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-dim); text-align: center; display: flex; flex-direction: column; gap: 8px;">
+      <a href="/" style="color: var(--accent-cyan); text-decoration: none; font-weight: 500;">← Back to Home Page</a>
+      <div>
+        © Copyright by <strong style="color: var(--text-muted);">RAJUAN</strong> · <a href="https://RAJUAN.is-a.dev" target="_blank" rel="noopener noreferrer" style="color: var(--accent-cyan); text-decoration: none;">RAJUAN.is-a.dev</a>
+      </div>
     </div>
   </div>
 
   <div id="toast-container" class="toast-container"></div>
 
   <script type="module">
-    import { setCsrfToken, showToast } from '/js/common.js';
+    import { setCsrfToken, setAuthToken, fetchWithAuth, showToast } from '/js/common.js';
 
     // If already logged in, redirect
-    fetch('/api/auth/me')
+    fetchWithAuth('/api/auth/me')
       .then(r => r.json())
       .then(data => {
         if (data.authenticated) {
@@ -100,12 +102,14 @@
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({ username, password }),
         });
 
         const data = await res.json();
         if (res.ok && data.success) {
           if (data.csrfToken) setCsrfToken(data.csrfToken);
+          if (data.token) setAuthToken(data.token);
           window.location.replace('/dashboard');
         } else {
           errorEl.textContent = data.error || 'Invalid username or password.';

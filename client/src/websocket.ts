@@ -97,6 +97,25 @@ export class TunnelClient {
     const wsUrl = this.getWsUrl();
     if (this.reconnectAttempts === 0) {
       console.log(`\n\x1b[36mConnecting to server:\x1b[0m ${this.options.serverUrl}`);
+
+      // Render cold-start optimization: ping /health to wake up sleeping free tier instances
+      if (this.options.serverUrl.includes('onrender.com')) {
+        process.stdout.write('\x1b[90mChecking Render edge health (waking if sleeping)...\x1b[0m ');
+        try {
+          const healthUrl = `${this.options.serverUrl.replace(/\/+$/, '')}/health`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 20000);
+          const res = await fetch(healthUrl, { signal: controller.signal });
+          clearTimeout(timer);
+          if (res.ok) {
+            console.log('\x1b[32m✔ Awake\x1b[0m');
+          } else {
+            console.log('\x1b[33m(connecting)\x1b[0m');
+          }
+        } catch (e) {
+          console.log('\x1b[33m(connecting)\x1b[0m');
+        }
+      }
     } else {
       console.log(`\x1b[33mAttempting reconnect (${this.reconnectAttempts})...\x1b[0m`);
     }

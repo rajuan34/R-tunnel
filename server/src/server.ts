@@ -35,6 +35,30 @@ function resolveWebDir(): string {
 
 const webDir = resolveWebDir();
 
+// Ensure React client bundle exists
+const clientBundlePath = path.join(webDir, 'dist', 'bundle.js');
+if (!fs.existsSync(clientBundlePath)) {
+  try {
+    const { buildSync } = await import('esbuild');
+    const entry = path.resolve(process.cwd(), 'src/main.tsx');
+    if (fs.existsSync(entry)) {
+      fs.mkdirSync(path.join(webDir, 'dist'), { recursive: true });
+      buildSync({
+        entryPoints: [entry],
+        bundle: true,
+        platform: 'browser',
+        format: 'esm',
+        target: 'es2020',
+        outfile: clientBundlePath,
+        define: { 'process.env.NODE_ENV': '"production"' },
+      });
+      logger.info('React client bundle built on startup');
+    }
+  } catch (err: any) {
+    logger.warn('Could not build React bundle dynamically on startup', { error: err?.message });
+  }
+}
+
 const app = express();
 const server = http.createServer(app);
 
@@ -74,29 +98,30 @@ app.use(cookieParser());
 // 6. Mount API routes
 app.use(apiRouter);
 
-// 7. Serve static web files
-app.use(express.static(webDir, { index: false }));
+// 7. Serve static web files (1 day cache for immutable assets in production)
+app.use(
+  express.static(webDir, {
+    index: false,
+    maxAge: config.isProduction ? '1d' : 0,
+    etag: true,
+  })
+);
 
-// 8. Frontend page routing
-app.get('/', (req: Request, res: Response) => {
+// 8. Dynamic React SPA Frontend page routing (never cache HTML entry point)
+const serveReactApp = (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(webDir, 'index.html'));
-});
+};
 
-app.get('/dashboard', (req: Request, res: Response) => {
-  res.sendFile(path.join(webDir, 'dashboard.html'));
-});
-
-app.get('/login', (req: Request, res: Response) => {
-  res.sendFile(path.join(webDir, 'login.html'));
-});
-
-app.get('/docs', (req: Request, res: Response) => {
-  res.sendFile(path.join(webDir, 'docs.html'));
-});
+app.get('/', serveReactApp);
+app.get('/dashboard', serveReactApp);
+app.get('/login', serveReactApp);
+app.get('/docs', serveReactApp);
 
 // 9. 404 handler for unrecognized routes
 app.use((req: Request, res: Response) => {
   if (req.accepts('html')) {
+    res.setHeader('Cache-Control', 'no-cache');
     res.status(404).sendFile(path.join(webDir, 'error.html'));
   } else {
     res.status(404).json({ error: 'Not Found', path: req.path });
@@ -139,19 +164,48 @@ server.on('upgrade', (req, socket, head) => {
 server.listen(config.port, config.host, () => {
   logger.info(`R-Tunnel server started on http://${config.host}:${config.port}`, {
     env: config.env,
+    isRender: config.isRender,
     publicBaseUrl: config.publicBaseUrl || `http://localhost:${config.port}`,
-    publicBaseDomain: config.publicBaseDomain || '(path-based fallback)',
+    publicBaseDomain: config.publicBaseDomain || '(path-based /t/<id>)',
     maxActiveTunnels: config.maxActiveTunnels,
   });
+
+  if (config.isRender) {
+    logger.info(`[Render Platform Detected] Service: ${config.renderServiceName || 'r-tunnel'} | Public URL: ${config.publicBaseUrl}`);
+  }
+
+  // Optional Keep-Alive for Render free instances to prevent inactivity sleep
+  if (config.keepAliveEnabled && config.publicBaseUrl && config.publicBaseUrl.startsWith('http')) {
+    logger.info('Render Keep-Alive loop enabled (pinging /health every 12 mins)');
+    setInterval(async () => {
+      try {
+        const pingUrl = `${config.publicBaseUrl}/health`;
+        const res = await fetch(pingUrl);
+        if (res.ok) {
+          logger.debug('Keep-alive ping successful');
+        }
+      } catch (err: any) {
+        logger.debug('Keep-alive ping failed', { error: err?.message });
+      }
+    }, 12 * 60 * 1000).unref();
+  }
 });
 
-// 13. Graceful Shutdown
+// 13. Graceful Shutdown (for zero-downtime rolling deploys on Render)
 const shutdown = (signal: string) => {
   logger.info(`Received ${signal}. Shutting down gracefully...`);
+  try {
+    clientWss.close();
+    dashboardWss.close();
+  } catch (e) {
+    // ignore
+  }
+
   server.close(() => {
     logger.info('HTTP & WebSocket servers closed.');
     process.exit(0);
   });
+
   // Force exit after 10s if stuck
   setTimeout(() => {
     logger.error('Forceful shutdown timeout.');

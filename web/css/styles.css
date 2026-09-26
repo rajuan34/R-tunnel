@@ -56,7 +56,26 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  width: 100%;
   overflow-x: hidden;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  flex: 1;
+}
+
+/* Responsive Utilities */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Background Subtle Grid Texture */
@@ -83,12 +102,21 @@ body::before {
 }
 
 .sidebar-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  z-index: 39;
+  display: none !important;
+}
+
+@media (max-width: 860px) {
+  .sidebar-overlay {
+    display: none !important;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 39;
+  }
+
+  .sidebar-overlay.active {
+    display: block !important;
+  }
 }
 
 .sidebar {
@@ -243,8 +271,7 @@ body::before {
 
 .top-header {
   height: 64px;
-  background: var(--bg-surface-glass);
-  backdrop-filter: blur(16px);
+  background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
@@ -743,8 +770,9 @@ tr:hover td {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(4, 7, 13, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(2, 6, 12, 0.55);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -752,7 +780,7 @@ tr:hover td {
   padding: 20px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
 }
 
 .modal-backdrop.open {
@@ -931,8 +959,7 @@ tr:hover td {
   left: 0;
   right: 0;
   height: 64px;
-  background: var(--bg-surface-glass);
-  backdrop-filter: blur(16px);
+  background: var(--bg-surface);
   border-top: 1px solid var(--border-subtle);
   z-index: 50;
   justify-content: space-around;

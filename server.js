@@ -45,16 +45,25 @@ function parseDurationSeconds(value, defaultValue) {
       return num;
   }
 }
+var isRenderEnv = Boolean(
+  process.env.RENDER || process.env.RENDER_SERVICE_ID || process.env.RENDER_EXTERNAL_URL || process.env.RENDER_EXTERNAL_HOSTNAME
+);
+var detectedRenderUrl = (process.env.RENDER_EXTERNAL_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "")).replace(/\/+$/, "");
 var config = {
-  env: process.env.NODE_ENV || "development",
-  isProduction: process.env.NODE_ENV === "production",
+  env: process.env.NODE_ENV || (isRenderEnv ? "production" : "development"),
+  isProduction: process.env.NODE_ENV === "production" || isRenderEnv,
+  isRender: isRenderEnv,
+  renderServiceId: process.env.RENDER_SERVICE_ID || "",
+  renderServiceName: process.env.RENDER_SERVICE_NAME || "",
   // Use port 3000 for local/AI Studio dev, fallback to PORT env (Render sets PORT e.g. 10000)
-  port: Number(process.env.PORT || 3e3),
+  port: parseInt(process.env.PORT || "3000", 10) || 3e3,
   host: "0.0.0.0",
   // Public domain and URL resolution
-  renderExternalUrl: process.env.RENDER_EXTERNAL_URL || "",
-  publicBaseUrl: process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || "",
+  renderExternalUrl: detectedRenderUrl,
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || detectedRenderUrl || "").replace(/\/+$/, ""),
   publicBaseDomain: (process.env.PUBLIC_BASE_DOMAIN || "").trim().toLowerCase(),
+  // Optional self keep-alive (pings /health every 12 mins to mitigate free tier sleep if desired)
+  keepAliveEnabled: process.env.KEEP_ALIVE === "true" || process.env.RENDER_KEEP_ALIVE === "true",
   // Authentication
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPassword: process.env.ADMIN_PASSWORD || "rajuanr34",
@@ -1195,12 +1204,13 @@ apiRouter.post("/api/auth/login", adminLoginRateLimit, async (req, res) => {
   const session = authService.createSession(username);
   res.cookie("rt_session", session.token, {
     httpOnly: true,
-    secure: config.isProduction,
-    sameSite: "lax",
+    secure: true,
+    sameSite: "none",
     maxAge: 24 * 60 * 60 * 1e3
   });
   res.json({
     success: true,
+    token: session.token,
     user: { username: session.username },
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt
@@ -1238,6 +1248,26 @@ apiRouter.get("/api/auth/me", (req, res) => {
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt
   });
+});
+apiRouter.get("/api/public-stats", async (req, res) => {
+  try {
+    const stats = await tunnelManager.getSystemStats();
+    res.json({
+      activeTunnels: stats.activeTunnels,
+      totalRequests: stats.totalRequests,
+      totalBytes: stats.totalBytesIn + stats.totalBytesOut,
+      connectedClients: stats.connectedClients,
+      uptimeSeconds: Math.floor(process.uptime())
+    });
+  } catch (e) {
+    res.json({
+      activeTunnels: 0,
+      totalRequests: 0,
+      totalBytes: 0,
+      connectedClients: 0,
+      uptimeSeconds: Math.floor(process.uptime())
+    });
+  }
 });
 apiRouter.use("/api", requireAdminAuth);
 apiRouter.get("/api/tunnels", async (req, res) => {
@@ -1538,6 +1568,28 @@ function resolveWebDir() {
   return path.resolve(process.cwd(), "web");
 }
 var webDir = resolveWebDir();
+var clientBundlePath = path.join(webDir, "dist", "bundle.js");
+if (!fs.existsSync(clientBundlePath)) {
+  try {
+    const { buildSync } = await import("esbuild");
+    const entry = path.resolve(process.cwd(), "src/main.tsx");
+    if (fs.existsSync(entry)) {
+      fs.mkdirSync(path.join(webDir, "dist"), { recursive: true });
+      buildSync({
+        entryPoints: [entry],
+        bundle: true,
+        platform: "browser",
+        format: "esm",
+        target: "es2020",
+        outfile: clientBundlePath,
+        define: { "process.env.NODE_ENV": '"production"' }
+      });
+      logger.info("React client bundle built on startup");
+    }
+  } catch (err) {
+    logger.warn("Could not build React bundle dynamically on startup", { error: err?.message });
+  }
+}
 var app = express();
 var server = http.createServer(app);
 app.set("trust proxy", true);
@@ -1562,21 +1614,24 @@ app.use(express.json({ limit: `${Math.round(config.maxBodySize / (1024 * 1024))}
 app.use(express.urlencoded({ extended: true, limit: `${Math.round(config.maxBodySize / (1024 * 1024))}mb` }));
 app.use(cookieParser());
 app.use(apiRouter);
-app.use(express.static(webDir, { index: false }));
-app.get("/", (req, res) => {
+app.use(
+  express.static(webDir, {
+    index: false,
+    maxAge: config.isProduction ? "1d" : 0,
+    etag: true
+  })
+);
+var serveReactApp = (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.sendFile(path.join(webDir, "index.html"));
-});
-app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(webDir, "dashboard.html"));
-});
-app.get("/login", (req, res) => {
-  res.sendFile(path.join(webDir, "login.html"));
-});
-app.get("/docs", (req, res) => {
-  res.sendFile(path.join(webDir, "docs.html"));
-});
+};
+app.get("/", serveReactApp);
+app.get("/dashboard", serveReactApp);
+app.get("/login", serveReactApp);
+app.get("/docs", serveReactApp);
 app.use((req, res) => {
   if (req.accepts("html")) {
+    res.setHeader("Cache-Control", "no-cache");
     res.status(404).sendFile(path.join(webDir, "error.html"));
   } else {
     res.status(404).json({ error: "Not Found", path: req.path });
@@ -1610,13 +1665,36 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(config.port, config.host, () => {
   logger.info(`R-Tunnel server started on http://${config.host}:${config.port}`, {
     env: config.env,
+    isRender: config.isRender,
     publicBaseUrl: config.publicBaseUrl || `http://localhost:${config.port}`,
-    publicBaseDomain: config.publicBaseDomain || "(path-based fallback)",
+    publicBaseDomain: config.publicBaseDomain || "(path-based /t/<id>)",
     maxActiveTunnels: config.maxActiveTunnels
   });
+  if (config.isRender) {
+    logger.info(`[Render Platform Detected] Service: ${config.renderServiceName || "r-tunnel"} | Public URL: ${config.publicBaseUrl}`);
+  }
+  if (config.keepAliveEnabled && config.publicBaseUrl && config.publicBaseUrl.startsWith("http")) {
+    logger.info("Render Keep-Alive loop enabled (pinging /health every 12 mins)");
+    setInterval(async () => {
+      try {
+        const pingUrl = `${config.publicBaseUrl}/health`;
+        const res = await fetch(pingUrl);
+        if (res.ok) {
+          logger.debug("Keep-alive ping successful");
+        }
+      } catch (err) {
+        logger.debug("Keep-alive ping failed", { error: err?.message });
+      }
+    }, 12 * 60 * 1e3).unref();
+  }
 });
 var shutdown = (signal) => {
   logger.info(`Received ${signal}. Shutting down gracefully...`);
+  try {
+    clientWss.close();
+    dashboardWss.close();
+  } catch (e) {
+  }
   server.close(() => {
     logger.info("HTTP & WebSocket servers closed.");
     process.exit(0);

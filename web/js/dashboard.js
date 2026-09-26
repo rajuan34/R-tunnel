@@ -1,6 +1,7 @@
 import {
   setCsrfToken,
   fetchWithAuth,
+  clearAuth,
   showToast,
   copyToClipboard,
   formatBytes,
@@ -46,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Authentication check
 async function checkAuth() {
   try {
-    const res = await fetch('/api/auth/me');
+    const res = await fetchWithAuth('/api/auth/me');
     const data = await res.json();
     if (data.authenticated && data.csrfToken) {
       setCsrfToken(data.csrfToken);
@@ -103,6 +104,7 @@ function setupNavigation() {
     logoutBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+      clearAuth();
       window.location.replace('/login');
     });
   }
@@ -125,6 +127,7 @@ function switchTab(tabId) {
   if (topTitle) {
     switch (tabId) {
       case 'dashboard': topTitle.textContent = 'Tunnel Overview'; break;
+      case 'create': topTitle.textContent = 'Create Tunnel'; break;
       case 'tunnels': topTitle.textContent = 'Active Tunnels'; break;
       case 'tokens': topTitle.textContent = 'Access Tokens'; break;
       case 'activity': topTitle.textContent = 'Traffic Inspector'; break;
@@ -581,12 +584,19 @@ function setupModals() {
       btn.closest('.modal-backdrop').classList.remove('open');
     });
   });
+
+  // Global Escape key listener to close modals immediately
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-backdrop.open').forEach((m) => m.classList.remove('open'));
+    }
+  });
 }
 
 function setupForms() {
   // Duration selector in Create Tunnel modal
   let selectedDuration = 3600; // 1 hour default
-  const durationBtns = document.querySelectorAll('.duration-btn');
+  const durationBtns = document.querySelectorAll('#modal-create-tunnel .duration-btn');
   durationBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       durationBtns.forEach((b) => b.classList.remove('selected'));
@@ -595,7 +605,96 @@ function setupForms() {
     });
   });
 
-  // Create Tunnel Form Submit
+  // Dedicated In-Page Create Tunnel Form
+  let pageSelectedDuration = 3600;
+  const pageDurationBtns = document.querySelectorAll('#page-duration-selector .duration-btn');
+  pageDurationBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      pageDurationBtns.forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      pageSelectedDuration = parseInt(btn.getAttribute('data-seconds'), 10);
+    });
+  });
+
+  // Port preset buttons
+  document.querySelectorAll('.page-port-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const port = btn.getAttribute('data-port');
+      const portInput = document.getElementById('page-input-local-port');
+      if (portInput) {
+        portInput.value = port;
+        portInput.focus();
+      }
+    });
+  });
+
+  // Page Create Tunnel Form Submit
+  const pageCreateForm = document.getElementById('page-create-tunnel-form');
+  if (pageCreateForm) {
+    pageCreateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const port = parseInt(document.getElementById('page-input-local-port').value, 10);
+      const label = document.getElementById('page-input-tunnel-label').value;
+
+      const submitBtn = document.getElementById('btn-page-create-submit');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Generating Tunnel...';
+
+      try {
+        const res = await fetchWithAuth('/api/tunnels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            port,
+            duration: pageSelectedDuration,
+            label,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Failed to create tunnel', 'error');
+          return;
+        }
+
+        // Show result box
+        const idleHint = document.getElementById('page-tunnel-idle-hint');
+        const outputBox = document.getElementById('page-tunnel-output-box');
+        const pubUrlEl = document.getElementById('page-res-public-url');
+        const cliCmdEl = document.getElementById('page-res-cli-cmd');
+
+        if (idleHint) idleHint.style.display = 'none';
+        if (outputBox) outputBox.style.display = 'block';
+        if (pubUrlEl) {
+          pubUrlEl.href = data.tunnel.publicUrl;
+          pubUrlEl.textContent = data.tunnel.publicUrl;
+        }
+        if (cliCmdEl) {
+          cliCmdEl.textContent = data.cliCommand;
+        }
+
+        // Setup copy button
+        const copyBtn = document.getElementById('btn-copy-page-cmd');
+        if (copyBtn) {
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(data.cliCommand);
+            showToast('CLI command copied to clipboard!', 'success');
+          };
+        }
+
+        showToast('Tunnel created successfully!', 'success');
+        await loadTunnels();
+        await loadStats();
+      } catch (err) {
+        showToast('Network error creating tunnel', 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '🚀 Create Tunnel & Generate Command';
+      }
+    });
+  }
+
+  // Create Tunnel Modal Form Submit
   const createForm = document.getElementById('create-tunnel-form');
   if (createForm) {
     createForm.addEventListener('submit', async (e) => {
@@ -722,8 +821,10 @@ function showCommandModal(tunnel, cliCommand) {
 }
 
 // Global actions exposed to window
+window.switchTab = switchTab;
+
 window.openCreateModal = () => {
-  document.getElementById('modal-create-tunnel').classList.add('open');
+  switchTab('create');
 };
 
 window.openTokenModal = () => {

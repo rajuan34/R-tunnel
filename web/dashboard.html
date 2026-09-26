@@ -34,7 +34,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
           Access Tokens
         </button>
-        <button class="nav-link" onclick="window.openCreateModal()">
+        <button class="nav-link" data-tab="create">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
           Create Tunnel
         </button>
@@ -46,12 +46,20 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
           Documentation
         </button>
+        <a href="/" class="nav-link" style="text-decoration: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+          Home Portal
+        </a>
       </nav>
 
       <div class="sidebar-footer">
         <div id="system-status" class="system-status-indicator">
           <span class="status-dot"></span>
           <span>SYSTEM ONLINE</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.4;">
+          © Copyright by <strong style="color: var(--text-muted);">RAJUAN</strong><br>
+          <a href="https://RAJUAN.is-a.dev" target="_blank" rel="noopener noreferrer" style="color: var(--accent-cyan); text-decoration: none;">RAJUAN.is-a.dev</a>
         </div>
       </div>
     </aside>
@@ -192,6 +200,87 @@
           <div id="tunnels-container-secondary" class="tunnels-grid"></div>
         </section>
 
+        <!-- Dedicated Create Tunnel Tab View (In-Page, Zero Dimming) -->
+        <section id="view-create" class="tab-view" style="display: none;">
+          <div class="section-header">
+            <div>
+              <h3 class="section-title">Create Temporary Tunnel</h3>
+              <p style="font-size: 13px; color: var(--text-muted); margin-top: 2px;">
+                Expose your local Android Termux port or developer server to a secure public HTTPS endpoint.
+              </p>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; max-width: 960px;">
+            <!-- Form Card -->
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-muted); border-radius: var(--radius-lg); padding: 22px;">
+              <form id="page-create-tunnel-form">
+                <div class="form-group">
+                  <label class="form-label" for="page-input-local-port">Local Target Port (on Android/Termux)</label>
+                  <input type="number" id="page-input-local-port" class="form-input" placeholder="e.g. 8080, 3000, 5000" min="1" max="65535" required value="8080">
+                  <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center;">
+                    <span style="font-size: 11px; color: var(--text-dim);">Port presets:</span>
+                    <button type="button" class="btn btn-secondary btn-sm page-port-preset" data-port="8080" style="padding: 2px 7px; font-size: 11px;">8080</button>
+                    <button type="button" class="btn btn-secondary btn-sm page-port-preset" data-port="3000" style="padding: 2px 7px; font-size: 11px;">3000</button>
+                    <button type="button" class="btn btn-secondary btn-sm page-port-preset" data-port="5000" style="padding: 2px 7px; font-size: 11px;">5000</button>
+                    <button type="button" class="btn btn-secondary btn-sm page-port-preset" data-port="5173" style="padding: 2px 7px; font-size: 11px;">5173</button>
+                    <button type="button" class="btn btn-secondary btn-sm page-port-preset" data-port="8000" style="padding: 2px 7px; font-size: 11px;">8000</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Lifetime Duration</label>
+                  <div class="duration-selector" id="page-duration-selector">
+                    <button type="button" class="duration-btn" data-seconds="1800">30 Mins</button>
+                    <button type="button" class="duration-btn selected" data-seconds="3600">1 Hour</button>
+                    <button type="button" class="duration-btn" data-seconds="7200">2 Hours</button>
+                    <button type="button" class="duration-btn" data-seconds="10800">3 Hours</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label" for="page-input-tunnel-label">Tunnel Label (Optional)</label>
+                  <input type="text" id="page-input-tunnel-label" class="form-input" placeholder="e.g. Termux API, Flask App, React App">
+                </div>
+
+                <div style="margin-top: 20px;">
+                  <button type="submit" id="btn-page-create-submit" class="btn btn-primary" style="width: 100%; padding: 11px; font-weight: 600;">
+                    🚀 Create Tunnel & Generate Command
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Terminal Result / Helper Card -->
+            <div style="background: var(--bg-surface); border: 1px solid var(--border-muted); border-radius: var(--radius-lg); padding: 22px; display: flex; flex-direction: column;">
+              <h4 style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">Android Termux Instructions</h4>
+              <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
+                Fill the form and hit "Create Tunnel". A live client command will be generated here. Run it in Termux to connect your local port to the edge proxy.
+              </p>
+
+              <div id="page-tunnel-idle-hint" style="background: #040812; border: 1px dashed var(--border-muted); border-radius: var(--radius-sm); padding: 14px; text-align: center; color: var(--text-dim); font-size: 12px; margin-top: auto; margin-bottom: auto;">
+                No active tunnel created yet from this form.<br>
+                Submit the form on the left to generate your live link.
+              </div>
+
+              <div id="page-tunnel-output-box" style="display: none; background: #03060c; border: 1px solid #10b981; border-radius: var(--radius-sm); padding: 14px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                  <span style="font-size: 12px; font-weight: 600; color: #10b981;">✓ Tunnel Created Successfully</span>
+                  <button type="button" id="btn-copy-page-cmd" class="btn btn-secondary btn-sm" style="font-size: 11px; padding: 3px 8px;">Copy Command</button>
+                </div>
+                <div style="font-size: 12px; margin-bottom: 6px; color: var(--text-muted);">
+                  Public URL: <a id="page-res-public-url" href="#" target="_blank" style="color: var(--accent-cyan); font-weight: 600; text-decoration: underline;"></a>
+                </div>
+                <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Run in Android Termux / Terminal:</div>
+                <pre id="page-res-cli-cmd" style="background: #070c18; padding: 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; color: #f8fafc; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+                <div style="margin-top: 10px; display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="switchTab('tunnels')" style="font-size: 11px; padding: 4px 10px;">View in Active Tunnels →</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Access Tokens Tab View (Industrial Security Control) -->
         <section id="view-tokens" class="tab-view" style="display: none;">
           <div class="section-header">
@@ -315,7 +404,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 11a9 9 0 0 1 9 9"></path><circle cx="5" cy="19" r="1"></circle></svg>
         <span>Tunnels</span>
       </button>
-      <button class="mobile-nav-item" onclick="window.openCreateModal()">
+      <button class="mobile-nav-item" data-tab="create">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
         <span>Create</span>
       </button>

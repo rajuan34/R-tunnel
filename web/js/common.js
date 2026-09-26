@@ -2,21 +2,53 @@
  * Common frontend utilities for R-Tunnel
  */
 
-let csrfToken = '';
+let csrfToken = localStorage.getItem('rt_csrf_token') || '';
+let authToken = localStorage.getItem('rt_auth_token') || '';
 
 export function setCsrfToken(token) {
-  csrfToken = token;
+  csrfToken = token || '';
+  if (token) {
+    localStorage.setItem('rt_csrf_token', token);
+  } else {
+    localStorage.removeItem('rt_csrf_token');
+  }
 }
 
 export function getCsrfToken() {
   return csrfToken;
 }
 
+export function setAuthToken(token) {
+  authToken = token || '';
+  if (token) {
+    localStorage.setItem('rt_auth_token', token);
+  } else {
+    localStorage.removeItem('rt_auth_token');
+  }
+}
+
+export function getAuthToken() {
+  return authToken;
+}
+
+export function clearAuth() {
+  csrfToken = '';
+  authToken = '';
+  localStorage.removeItem('rt_csrf_token');
+  localStorage.removeItem('rt_auth_token');
+}
+
 export async function fetchWithAuth(url, options = {}) {
   const headers = new Headers(options.headers || {});
+  
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
+
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((options.method || 'GET').toUpperCase())) {
     headers.set('X-CSRF-Token', csrfToken);
   }
+
   return fetch(url, {
     ...options,
     headers,

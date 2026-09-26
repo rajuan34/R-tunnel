@@ -29,17 +29,35 @@ function parseDurationSeconds(value: string | undefined, defaultValue: number): 
   }
 }
 
+const isRenderEnv = Boolean(
+  process.env.RENDER ||
+  process.env.RENDER_SERVICE_ID ||
+  process.env.RENDER_EXTERNAL_URL ||
+  process.env.RENDER_EXTERNAL_HOSTNAME
+);
+
+const detectedRenderUrl = (
+  process.env.RENDER_EXTERNAL_URL ||
+  (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '')
+).replace(/\/+$/, '');
+
 export const config = {
-  env: process.env.NODE_ENV || 'development',
-  isProduction: process.env.NODE_ENV === 'production',
+  env: process.env.NODE_ENV || (isRenderEnv ? 'production' : 'development'),
+  isProduction: process.env.NODE_ENV === 'production' || isRenderEnv,
+  isRender: isRenderEnv,
+  renderServiceId: process.env.RENDER_SERVICE_ID || '',
+  renderServiceName: process.env.RENDER_SERVICE_NAME || '',
   // Use port 3000 for local/AI Studio dev, fallback to PORT env (Render sets PORT e.g. 10000)
-  port: Number(process.env.PORT || 3000),
+  port: parseInt(process.env.PORT || '3000', 10) || 3000,
   host: '0.0.0.0',
 
   // Public domain and URL resolution
-  renderExternalUrl: process.env.RENDER_EXTERNAL_URL || '',
-  publicBaseUrl: process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '',
+  renderExternalUrl: detectedRenderUrl,
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || detectedRenderUrl || '').replace(/\/+$/, ''),
   publicBaseDomain: (process.env.PUBLIC_BASE_DOMAIN || '').trim().toLowerCase(),
+
+  // Optional self keep-alive (pings /health every 12 mins to mitigate free tier sleep if desired)
+  keepAliveEnabled: process.env.KEEP_ALIVE === 'true' || process.env.RENDER_KEEP_ALIVE === 'true',
 
   // Authentication
   adminUsername: process.env.ADMIN_USERNAME || 'admin',

@@ -36,16 +36,17 @@ apiRouter.post('/api/auth/login', adminLoginRateLimit, async (req: Request, res:
 
   const session = authService.createSession(username);
 
-  // Set secure HTTP-only cookie
+  // Set secure HTTP-only cookie with sameSite=none for cross-origin iframes
   res.cookie('rt_session', session.token, {
     httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
     maxAge: 24 * 60 * 60 * 1000,
   });
 
   res.json({
     success: true,
+    token: session.token,
     user: { username: session.username },
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt,
@@ -96,6 +97,31 @@ apiRouter.get('/api/auth/me', (req: Request, res: Response) => {
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt,
   });
+});
+
+/**
+ * Public system statistics (safe for landing page)
+ * GET /api/public-stats
+ */
+apiRouter.get('/api/public-stats', async (req: Request, res: Response) => {
+  try {
+    const stats = await tunnelManager.getSystemStats();
+    res.json({
+      activeTunnels: stats.activeTunnels,
+      totalRequests: stats.totalRequests,
+      totalBytes: stats.totalBytesIn + stats.totalBytesOut,
+      connectedClients: stats.connectedClients,
+      uptimeSeconds: Math.floor(process.uptime()),
+    });
+  } catch (e) {
+    res.json({
+      activeTunnels: 0,
+      totalRequests: 0,
+      totalBytes: 0,
+      connectedClients: 0,
+      uptimeSeconds: Math.floor(process.uptime()),
+    });
+  }
 });
 
 // All routes below require admin authentication
