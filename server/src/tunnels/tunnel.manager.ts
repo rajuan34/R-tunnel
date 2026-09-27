@@ -47,6 +47,8 @@ export class TunnelManager {
     customTunnelId?: string;
     clientIp?: string;
     clientId?: string;
+    userId?: string;
+    username?: string;
   }): Promise<{ tunnel: TunnelRecord; error?: string }> {
     // Check global active tunnel limit
     const active = await this.store.getActive();
@@ -97,13 +99,35 @@ export class TunnelManager {
       bytesOut: 0,
       clientIp: options.clientIp,
       clientId: options.clientId,
+      userId: options.userId,
+      username: options.username,
     };
 
     await this.store.set(tunnel);
-    logger.info('Tunnel created', { tunnelId, port: options.port, durationSeconds: duration });
+    logger.info('Tunnel created', {
+      tunnelId,
+      port: options.port,
+      durationSeconds: duration,
+      username: options.username,
+    });
     dashboardWsManager.broadcast('tunnel_created', tunnel);
 
     return { tunnel };
+  }
+
+  /**
+   * Stop all active tunnels owned by a specific user (e.g. on suspension or deletion).
+   */
+  async stopTunnelsForUser(userId: string, reason: 'manual' | 'timeout' | 'idle' = 'manual'): Promise<number> {
+    const active = await this.store.getActive();
+    let count = 0;
+    for (const t of active) {
+      if (t.userId === userId) {
+        await this.stopTunnel(t.id, reason);
+        count++;
+      }
+    }
+    return count;
   }
 
   /**

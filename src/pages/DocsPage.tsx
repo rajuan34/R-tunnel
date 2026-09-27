@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, Copy, Check, ExternalLink, ShieldCheck, ArrowRight, Code } from 'lucide-react';
+import { Terminal, Copy, Check, ExternalLink, ShieldCheck, ArrowRight, Code, Key, Users } from 'lucide-react';
 
 interface DocsPageProps {
   onNavigate: (path: string) => void;
@@ -146,11 +146,51 @@ npx @r-tunnel/client --port 8080`}
           </div>
         </div>
 
-        {/* Section 4: Architecture & Security */}
+        {/* Section 4: User Management & Master Keys */}
+        <div className="bg-[#0a0f1d] border border-slate-800 rounded-xl p-6 sm:p-8 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Key className="w-5 h-5 text-emerald-400" />
+              <span>4. Dashboard User Management & Master Keys</span>
+            </h2>
+            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded">
+              Multi-User Support
+            </span>
+          </div>
+
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            Administrators can create dedicated user accounts directly from the <strong>Users &amp; Master Keys</strong> dashboard tab. Each user is assigned a unique, cryptographically secure Master Key (<code className="text-cyan-400">rt_master_...</code>).
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs pt-1">
+            <div className="bg-[#03060c] border border-slate-800 p-3.5 rounded-lg space-y-1.5">
+              <div className="font-bold text-white">1. Provision Account</div>
+              <p className="text-slate-400 leading-relaxed">
+                Add username, optional email or device notes (e.g. &quot;Android 14 Termux Node&quot;), and configure tunnel limits.
+              </p>
+            </div>
+
+            <div className="bg-[#03060c] border border-slate-800 p-3.5 rounded-lg space-y-1.5">
+              <div className="font-bold text-white">2. Share Master Key</div>
+              <p className="text-slate-400 leading-relaxed">
+                Copy the generated Master Key or full formatted invitation message and share it with your user or colleague.
+              </p>
+            </div>
+
+            <div className="bg-[#03060c] border border-slate-800 p-3.5 rounded-lg space-y-1.5">
+              <div className="font-bold text-white">3. Connect via CLI</div>
+              <p className="text-slate-400 leading-relaxed">
+                The user runs <code className="text-cyan-400">rtunnel login</code> or passes <code className="text-cyan-400">--token &lt;key&gt;</code> to establish persistent encrypted tunnels.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 5: Architecture & Security */}
         <div className="bg-[#0a0f1d] border border-slate-800 rounded-xl p-6 sm:p-8 space-y-4">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <span>4. How Carrier NAT Punch-Through Works</span>
+            <span>5. How Carrier NAT Punch-Through Works</span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
             Mobile cellular networks (4G/5G) assign private IPs behind Carrier-Grade NAT (CGNAT), making inbound port forwarding impossible on mobile devices.
@@ -161,7 +201,7 @@ npx @r-tunnel/client --port 8080`}
           </p>
         </div>
 
-        {/* Section 5: Developer Credit Banner */}
+        {/* Section 6: Developer Credit Banner */}
         <div className="bg-gradient-to-r from-[#0d162b] to-[#0a1020] border border-slate-800 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <div className="text-xs font-mono text-cyan-400 uppercase">Need Account Credentials?</div>

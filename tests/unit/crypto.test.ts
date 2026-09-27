@@ -57,9 +57,14 @@ describe('Crypto & ID Generation Utilities', () => {
     config.adminPassword = 'plainPassword123';
     config.adminPasswordHash = '';
 
-    assert.strictEqual(await authService.verifyAdmin('myadmin', 'plainPassword123'), true);
-    assert.strictEqual(await authService.verifyAdmin('myadmin', 'wrong'), false);
-    assert.strictEqual(await authService.verifyAdmin('otheruser', 'plainPassword123'), false);
+    const res1 = await authService.verifyAdmin('myadmin', 'plainPassword123');
+    assert.strictEqual(res1.valid, true);
+
+    const res2 = await authService.verifyAdmin('myadmin', 'wrong');
+    assert.strictEqual(res2.valid, false);
+
+    const res3 = await authService.verifyAdmin('otheruser', 'plainPassword123');
+    assert.strictEqual(res3.valid, false);
 
     // Clean up
     config.adminUsername = originalUser;

@@ -16,6 +16,8 @@ export interface TunnelRecord {
   clientIp?: string;
   clientToken?: string;
   clientId?: string;
+  userId?: string;
+  username?: string;
 }
 
 export interface ActivityLogEntry {

@@ -11,6 +11,8 @@ export interface Tunnel {
   requestCount?: number;
   bytesTransferred?: number;
   lastPing?: number;
+  userId?: string;
+  username?: string;
 }
 
 export interface SystemStats {
@@ -18,6 +20,7 @@ export interface SystemStats {
   totalRequests: number;
   totalBytes: number;
   connectedClients: number;
+  registeredUsers?: number;
   uptimeSeconds: number;
 }
 
@@ -42,9 +45,27 @@ export interface ApiToken {
   lastUsedAt?: number;
 }
 
+export interface ManagedUser {
+  id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  note?: string;
+  masterKey: string;
+  role: 'admin' | 'user';
+  status: 'active' | 'suspended';
+  maxTunnels: number;
+  createdAt: number;
+  expiresAt: number | null;
+  lastUsedAt?: number;
+  lastClientIp?: string;
+  activeTunnelsCount?: number;
+}
+
 export interface AuthState {
   authenticated: boolean;
   role?: string;
   username?: string;
+  userId?: string;
   checked: boolean;
 }

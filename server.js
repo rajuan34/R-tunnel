@@ -1,7 +1,7 @@
 // server/src/server.ts
 import http from "node:http";
-import fs from "node:fs";
-import path from "node:path";
+import fs2 from "node:fs";
+import path2 from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocketServer as WebSocketServer2 } from "ws";
@@ -419,12 +419,33 @@ var TunnelManager = class {
       bytesIn: 0,
       bytesOut: 0,
       clientIp: options.clientIp,
-      clientId: options.clientId
+      clientId: options.clientId,
+      userId: options.userId,
+      username: options.username
     };
     await this.store.set(tunnel);
-    logger.info("Tunnel created", { tunnelId, port: options.port, durationSeconds: duration });
+    logger.info("Tunnel created", {
+      tunnelId,
+      port: options.port,
+      durationSeconds: duration,
+      username: options.username
+    });
     dashboardWsManager.broadcast("tunnel_created", tunnel);
     return { tunnel };
+  }
+  /**
+   * Stop all active tunnels owned by a specific user (e.g. on suspension or deletion).
+   */
+  async stopTunnelsForUser(userId, reason = "manual") {
+    const active = await this.store.getActive();
+    let count = 0;
+    for (const t of active) {
+      if (t.userId === userId) {
+        await this.stopTunnel(t.id, reason);
+        count++;
+      }
+    }
+    return count;
   }
   /**
    * Binds a connected WebSocket client to a tunnel.
@@ -994,6 +1015,279 @@ async function proxyMiddleware(req, res, next) {
 // server/src/http/api.router.ts
 import { Router } from "express";
 
+// server/src/auth/user.service.ts
+import fs from "node:fs";
+import path from "node:path";
+var UserService = class {
+  users = /* @__PURE__ */ new Map();
+  // key: user.id
+  storageFilePath;
+  initialized = false;
+  constructor(storageDir = "data") {
+    this.storageFilePath = path.resolve(process.cwd(), storageDir, "users.json");
+    this.init();
+  }
+  init() {
+    if (this.initialized) return;
+    this.initialized = true;
+    try {
+      const dir = path.dirname(this.storageFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      if (fs.existsSync(this.storageFilePath)) {
+        const raw = fs.readFileSync(this.storageFilePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const u of parsed) {
+            if (u && u.id && u.username && u.masterKey) {
+              this.users.set(u.id, {
+                ...u,
+                username: u.username.toLowerCase(),
+                maxTunnels: typeof u.maxTunnels === "number" ? u.maxTunnels : 5,
+                status: u.status === "suspended" ? "suspended" : "active",
+                role: u.role === "admin" ? "admin" : "user"
+              });
+            }
+          }
+          logger.info(`Loaded ${this.users.size} managed users from storage`);
+        }
+      } else {
+        this.saveToDisk();
+      }
+    } catch (err) {
+      logger.warn(`Could not load users from ${this.storageFilePath}, using in-memory store`, {
+        error: err?.message
+      });
+    }
+  }
+  saveToDisk() {
+    try {
+      const dir = path.dirname(this.storageFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = Array.from(this.users.values());
+      const tempPath = `${this.storageFilePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8");
+      fs.renameSync(tempPath, this.storageFilePath);
+    } catch (err) {
+      logger.error("Failed to save users to disk", { error: err?.message });
+    }
+  }
+  /**
+   * Get all registered users.
+   */
+  getAllUsers() {
+    return Array.from(this.users.values()).sort((a, b) => b.createdAt - a.createdAt);
+  }
+  /**
+   * Find user by ID.
+   */
+  getUserById(id) {
+    return this.users.get(id) || null;
+  }
+  /**
+   * Find user by username (case-insensitive).
+   */
+  getUserByUsername(username) {
+    if (!username) return null;
+    const clean = username.trim().toLowerCase();
+    for (const user of this.users.values()) {
+      if (user.username.toLowerCase() === clean) {
+        return user;
+      }
+    }
+    return null;
+  }
+  /**
+   * Find user by Master Key using timing-safe comparison.
+   */
+  getUserByMasterKey(key) {
+    if (!key) return null;
+    for (const user of this.users.values()) {
+      if (timingSafeEqual(user.masterKey, key)) {
+        return user;
+      }
+    }
+    return null;
+  }
+  /**
+   * Verify whether a Master Key is valid, active, and unexpired.
+   * If valid, updates lastUsedAt and returns the user.
+   */
+  verifyUserMasterKey(key, clientIp) {
+    const user = this.getUserByMasterKey(key);
+    if (!user) return null;
+    if (user.status !== "active") {
+      logger.warn(`User master key used for suspended account: ${user.username}`);
+      return null;
+    }
+    if (user.expiresAt && Date.now() > user.expiresAt) {
+      logger.warn(`User master key expired for user: ${user.username}`);
+      return null;
+    }
+    user.lastUsedAt = Date.now();
+    if (clientIp) {
+      user.lastClientIp = clientIp;
+    }
+    this.saveToDisk();
+    return user;
+  }
+  /**
+   * Create a new user with an auto-generated or custom Master Key.
+   */
+  createUser(input) {
+    const username = (input.username || "").trim().toLowerCase();
+    if (!username || username.length < 2 || username.length > 32) {
+      return { user: null, error: "Username must be between 2 and 32 characters." };
+    }
+    if (!/^[a-z0-9_-]+$/.test(username)) {
+      return {
+        user: null,
+        error: "Username can only contain alphanumeric characters, hyphens, and underscores."
+      };
+    }
+    if (this.getUserByUsername(username)) {
+      return { user: null, error: `Username "${username}" already exists.` };
+    }
+    let masterKey = (input.masterKey || "").trim();
+    if (masterKey) {
+      if (masterKey.length < 8) {
+        return { user: null, error: "Custom master key must be at least 8 characters long." };
+      }
+      if (this.getUserByMasterKey(masterKey)) {
+        return { user: null, error: "This master key is already assigned to another user." };
+      }
+    } else {
+      masterKey = `rt_master_${generateSecureToken(20)}`;
+    }
+    const now = Date.now();
+    let expiresAt = null;
+    if (input.expiresInDays && input.expiresInDays > 0) {
+      expiresAt = now + input.expiresInDays * 24 * 60 * 60 * 1e3;
+    }
+    const id = `usr_${generateSecureToken(8)}`;
+    const user = {
+      id,
+      username,
+      displayName: input.displayName?.trim() || void 0,
+      email: input.email?.trim() || void 0,
+      note: input.note?.trim() || void 0,
+      masterKey,
+      role: input.role === "admin" ? "admin" : "user",
+      status: input.status === "suspended" ? "suspended" : "active",
+      maxTunnels: typeof input.maxTunnels === "number" ? Math.max(0, input.maxTunnels) : 5,
+      createdAt: now,
+      expiresAt
+    };
+    this.users.set(id, user);
+    this.saveToDisk();
+    logger.info("Managed user created", {
+      userId: id,
+      username: user.username,
+      role: user.role,
+      maxTunnels: user.maxTunnels
+    });
+    return { user };
+  }
+  /**
+   * Update an existing user.
+   */
+  updateUser(id, updates) {
+    const user = this.users.get(id);
+    if (!user) {
+      return { user: null, error: "User not found." };
+    }
+    if (updates.displayName !== void 0) {
+      user.displayName = updates.displayName.trim() || void 0;
+    }
+    if (updates.email !== void 0) {
+      user.email = updates.email.trim() || void 0;
+    }
+    if (updates.note !== void 0) {
+      user.note = updates.note.trim() || void 0;
+    }
+    if (updates.role !== void 0) {
+      user.role = updates.role === "admin" ? "admin" : "user";
+    }
+    if (updates.status !== void 0) {
+      user.status = updates.status === "suspended" ? "suspended" : "active";
+    }
+    if (typeof updates.maxTunnels === "number") {
+      user.maxTunnels = Math.max(0, updates.maxTunnels);
+    }
+    if (updates.expiresAt !== void 0) {
+      user.expiresAt = updates.expiresAt;
+    }
+    this.saveToDisk();
+    logger.info("Managed user updated", { userId: id, username: user.username });
+    return { user };
+  }
+  /**
+   * Regenerate or set a new Master Key for a user.
+   */
+  regenerateMasterKey(id, customKey) {
+    const user = this.users.get(id);
+    if (!user) {
+      return { user: null, error: "User not found." };
+    }
+    let newKey = (customKey || "").trim();
+    if (newKey) {
+      if (newKey.length < 8) {
+        return { user: null, error: "Custom master key must be at least 8 characters long." };
+      }
+      const existing = this.getUserByMasterKey(newKey);
+      if (existing && existing.id !== id) {
+        return { user: null, error: "This master key is already assigned to another user." };
+      }
+    } else {
+      newKey = `rt_master_${generateSecureToken(20)}`;
+    }
+    user.masterKey = newKey;
+    this.saveToDisk();
+    logger.info("User master key regenerated", { userId: id, username: user.username });
+    return { user, newMasterKey: newKey };
+  }
+  /**
+   * Delete a user by ID.
+   */
+  deleteUser(id) {
+    const user = this.users.get(id);
+    if (!user) {
+      return { success: false, deletedUser: null };
+    }
+    this.users.delete(id);
+    this.saveToDisk();
+    logger.info("Managed user deleted", { userId: id, username: user.username });
+    return { success: true, deletedUser: user };
+  }
+  /**
+   * Record client activity for a user.
+   */
+  recordUserActivity(id, clientIp) {
+    const user = this.users.get(id);
+    if (user) {
+      user.lastUsedAt = Date.now();
+      if (clientIp) user.lastClientIp = clientIp;
+      this.saveToDisk();
+    }
+  }
+  /**
+   * Get user counts / stats.
+   */
+  getUserStats() {
+    let active = 0;
+    let suspended = 0;
+    for (const u of this.users.values()) {
+      if (u.status === "active") active++;
+      else suspended++;
+    }
+    return { total: this.users.size, active, suspended };
+  }
+};
+var userService = new UserService();
+
 // server/src/auth/auth.service.ts
 var AuthService = class {
   sessions = /* @__PURE__ */ new Map();
@@ -1004,39 +1298,48 @@ var AuthService = class {
     setInterval(() => this.cleanup(), 6e4).unref();
   }
   /**
-   * Verify admin credentials.
+   * Verify admin or user credentials for dashboard access.
    */
   async verifyAdmin(username, passwordPlain) {
-    if (!username || !passwordPlain) return false;
-    if (username !== config.adminUsername) return false;
-    if (config.adminPassword) {
-      return timingSafeEqual(passwordPlain, config.adminPassword);
-    }
-    if (config.adminPasswordHash) {
-      try {
-        return await verifyPassword(passwordPlain, config.adminPasswordHash);
-      } catch (err) {
-        logger.error("Error verifying admin password hash", { err });
-        return false;
+    if (!username || !passwordPlain) return { valid: false };
+    if (username === config.adminUsername) {
+      if (config.adminPassword) {
+        if (timingSafeEqual(passwordPlain, config.adminPassword)) {
+          return { valid: true };
+        }
+      } else if (config.adminPasswordHash) {
+        try {
+          const ok = await verifyPassword(passwordPlain, config.adminPasswordHash);
+          if (ok) return { valid: true };
+        } catch (err) {
+          logger.error("Error verifying admin password hash", { err });
+        }
+      } else if (!config.isProduction) {
+        if (passwordPlain === "admin") {
+          return { valid: true };
+        }
       }
     }
-    if (!config.isProduction) {
-      logger.warn("Neither ADMIN_PASSWORD nor ADMIN_PASSWORD_HASH is set. Allowing dev login (admin/admin).");
-      return passwordPlain === "admin";
+    const managedUser = userService.getUserByUsername(username);
+    if (managedUser && managedUser.status === "active") {
+      if (timingSafeEqual(passwordPlain, managedUser.masterKey)) {
+        return { valid: true, user: managedUser };
+      }
     }
-    logger.error("ADMIN_PASSWORD or ADMIN_PASSWORD_HASH is required in production environment");
-    return false;
+    return { valid: false };
   }
   /**
-   * Create an admin session after successful login.
+   * Create a session after successful login.
    */
-  createSession(username) {
+  createSession(username, role = "admin", userId) {
     const token = generateSecureToken(32);
     const csrfToken = generateSecureToken(24);
     const now = Date.now();
     const session = {
       token,
       username,
+      role,
+      userId,
       createdAt: now,
       expiresAt: now + this.sessionTtlMs,
       csrfToken
@@ -1064,10 +1367,13 @@ var AuthService = class {
     return this.sessions.delete(token);
   }
   /**
-   * Verify a Termux client token.
-   * Can be either the server's TUNNEL_MASTER_TOKEN or an ephemeral client token.
+   * Verify a Termux client token or user Master Key.
+   * Can be either:
+   * 1. The server's TUNNEL_MASTER_TOKEN
+   * 2. An ephemeral client token
+   * 3. A dedicated Managed User Master Key
    */
-  verifyClientToken(token) {
+  verifyClientToken(token, clientIp) {
     if (!token) return false;
     if (config.tunnelMasterToken && timingSafeEqual(token, config.tunnelMasterToken)) {
       return true;
@@ -1079,10 +1385,21 @@ var AuthService = class {
       }
       this.clientTokens.delete(token);
     }
+    const user = userService.verifyUserMasterKey(token, clientIp);
+    if (user) {
+      return true;
+    }
     if (!config.isProduction && !config.tunnelMasterToken && token === "dev-tunnel-token") {
       return true;
     }
     return false;
+  }
+  /**
+   * Get user assigned to this Master Key if any.
+   */
+  getUserByToken(token) {
+    if (!token) return null;
+    return userService.getUserByMasterKey(token);
   }
   /**
    * Create a short-lived client token (used by Dashboard Command Generator).
@@ -1193,15 +1510,17 @@ apiRouter.get("/health", (req, res) => {
 apiRouter.post("/api/auth/login", adminLoginRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
-    res.status(400).json({ error: "Username and password are required" });
+    res.status(400).json({ error: "Username and password / master key are required" });
     return;
   }
-  const isValid = await authService.verifyAdmin(username, password);
-  if (!isValid) {
-    res.status(401).json({ error: "Invalid username or password" });
+  const authResult = await authService.verifyAdmin(username, password);
+  if (!authResult.valid) {
+    res.status(401).json({ error: "Invalid username or password/master key" });
     return;
   }
-  const session = authService.createSession(username);
+  const role = authResult.user?.role || "admin";
+  const userId = authResult.user?.id;
+  const session = authService.createSession(username, role, userId);
   res.cookie("rt_session", session.token, {
     httpOnly: true,
     secure: true,
@@ -1211,7 +1530,11 @@ apiRouter.post("/api/auth/login", adminLoginRateLimit, async (req, res) => {
   res.json({
     success: true,
     token: session.token,
-    user: { username: session.username },
+    user: {
+      username: session.username,
+      role: session.role || "admin",
+      userId: session.userId
+    },
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt
   });
@@ -1244,7 +1567,11 @@ apiRouter.get("/api/auth/me", (req, res) => {
   }
   res.json({
     authenticated: true,
-    user: { username: session.username },
+    user: {
+      username: session.username,
+      role: session.role || "admin",
+      userId: session.userId
+    },
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt
   });
@@ -1252,11 +1579,13 @@ apiRouter.get("/api/auth/me", (req, res) => {
 apiRouter.get("/api/public-stats", async (req, res) => {
   try {
     const stats = await tunnelManager.getSystemStats();
+    const userStats = userService.getUserStats();
     res.json({
       activeTunnels: stats.activeTunnels,
       totalRequests: stats.totalRequests,
       totalBytes: stats.totalBytesIn + stats.totalBytesOut,
       connectedClients: stats.connectedClients,
+      registeredUsers: userStats.total,
       uptimeSeconds: Math.floor(process.uptime())
     });
   } catch (e) {
@@ -1265,6 +1594,7 @@ apiRouter.get("/api/public-stats", async (req, res) => {
       totalRequests: 0,
       totalBytes: 0,
       connectedClients: 0,
+      registeredUsers: 0,
       uptimeSeconds: Math.floor(process.uptime())
     });
   }
@@ -1374,12 +1704,164 @@ apiRouter.delete("/api/tokens/:token", requireCsrf, (req, res) => {
   }
   res.json({ success: true, message: "Token revoked" });
 });
+apiRouter.get("/api/users", async (req, res) => {
+  const users = userService.getAllUsers();
+  const activeTunnels = await tunnelStore.getActive();
+  const userListWithCounts = users.map((u) => {
+    const activeCount = activeTunnels.filter((t) => t.userId === u.id).length;
+    return {
+      ...u,
+      activeTunnelsCount: activeCount
+    };
+  });
+  const stats = userService.getUserStats();
+  res.json({
+    users: userListWithCounts,
+    stats
+  });
+});
+apiRouter.post("/api/users", requireCsrf, async (req, res) => {
+  const {
+    username,
+    displayName,
+    email,
+    note,
+    masterKey,
+    role = "user",
+    status = "active",
+    maxTunnels = 5,
+    expiresInDays
+  } = req.body || {};
+  const { user, error } = userService.createUser({
+    username,
+    displayName,
+    email,
+    note,
+    masterKey,
+    role,
+    status,
+    maxTunnels: parseInt(maxTunnels, 10),
+    expiresInDays: expiresInDays ? parseInt(expiresInDays, 10) : void 0
+  });
+  if (error || !user) {
+    res.status(400).json({ error: error || "Failed to create user" });
+    return;
+  }
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const serverUrl = config.publicBaseUrl || `${proto}://${host}`;
+  const cliLoginCommand = `rtunnel login --server "${serverUrl}" --token "${user.masterKey}"`;
+  const cliCreateCommand = `rtunnel 8080 --server "${serverUrl}" --token "${user.masterKey}"`;
+  res.status(201).json({
+    user: {
+      ...user,
+      activeTunnelsCount: 0
+    },
+    cliLoginCommand,
+    cliCreateCommand
+  });
+});
+apiRouter.get("/api/users/:id", async (req, res) => {
+  const user = userService.getUserById(req.params.id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const activeTunnels = await tunnelStore.getActive();
+  const userTunnels = activeTunnels.filter((t) => t.userId === user.id);
+  res.json({
+    user: {
+      ...user,
+      activeTunnelsCount: userTunnels.length
+    },
+    tunnels: userTunnels
+  });
+});
+apiRouter.put("/api/users/:id", requireCsrf, async (req, res) => {
+  const { displayName, email, note, role, status, maxTunnels, expiresAt } = req.body || {};
+  const { user, error } = userService.updateUser(req.params.id, {
+    displayName,
+    email,
+    note,
+    role,
+    status,
+    maxTunnels: typeof maxTunnels === "number" ? maxTunnels : void 0,
+    expiresAt
+  });
+  if (error || !user) {
+    res.status(400).json({ error: error || "Failed to update user" });
+    return;
+  }
+  if (user.status === "suspended") {
+    await tunnelManager.stopTunnelsForUser(user.id, "manual");
+  }
+  const activeTunnels = await tunnelStore.getActive();
+  const activeCount = activeTunnels.filter((t) => t.userId === user.id).length;
+  res.json({
+    user: {
+      ...user,
+      activeTunnelsCount: activeCount
+    }
+  });
+});
+apiRouter.post("/api/users/:id/regenerate-key", requireCsrf, async (req, res) => {
+  const { customKey } = req.body || {};
+  const { user, newMasterKey, error } = userService.regenerateMasterKey(req.params.id, customKey);
+  if (error || !user) {
+    res.status(400).json({ error: error || "Failed to regenerate Master Key" });
+    return;
+  }
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const serverUrl = config.publicBaseUrl || `${proto}://${host}`;
+  const cliLoginCommand = `rtunnel login --server "${serverUrl}" --token "${newMasterKey}"`;
+  const cliCreateCommand = `rtunnel 8080 --server "${serverUrl}" --token "${newMasterKey}"`;
+  res.json({
+    user,
+    newMasterKey,
+    cliLoginCommand,
+    cliCreateCommand
+  });
+});
+apiRouter.post("/api/users/:id/toggle-status", requireCsrf, async (req, res) => {
+  const user = userService.getUserById(req.params.id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const newStatus = user.status === "active" ? "suspended" : "active";
+  const { user: updatedUser } = userService.updateUser(user.id, { status: newStatus });
+  if (newStatus === "suspended") {
+    await tunnelManager.stopTunnelsForUser(user.id, "manual");
+  }
+  res.json({
+    user: updatedUser
+  });
+});
+apiRouter.delete("/api/users/:id", requireCsrf, async (req, res) => {
+  const user = userService.getUserById(req.params.id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  await tunnelManager.stopTunnelsForUser(user.id, "manual");
+  const { success } = userService.deleteUser(user.id);
+  if (!success) {
+    res.status(400).json({ error: "Failed to delete user" });
+    return;
+  }
+  res.json({
+    success: true,
+    message: `User ${user.username} deleted and active tunnels closed`
+  });
+});
 
 // server/src/websocket/client.ws.ts
 import { WebSocket as WebSocket3 } from "ws";
 function handleClientWebSocketConnection(ws, req) {
   const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
   let isAuthenticated = false;
+  let authenticatedUser = null;
   let boundTunnelId = null;
   let isAlive = true;
   logger.info("Client WebSocket connected", { clientIp });
@@ -1415,13 +1897,13 @@ function handleClientWebSocketConnection(ws, req) {
         }
         case "client_hello": {
           const payload = msg.payload;
-          if (!payload || !authService.verifyClientToken(payload.token)) {
+          if (!payload || !authService.verifyClientToken(payload.token, clientIp)) {
             logger.warn("Client authentication failed", { clientIp });
             ws.send(
               serializeMessage(
                 createMessage("error", {
                   code: "UNAUTHORIZED",
-                  message: "Authentication failed. Invalid tunnel token."
+                  message: "Authentication failed. Invalid master key or tunnel token."
                 })
               )
             );
@@ -1429,14 +1911,19 @@ function handleClientWebSocketConnection(ws, req) {
             return;
           }
           isAuthenticated = true;
-          logger.info("Client authenticated successfully", { clientIp, version: payload.clientVersion });
+          authenticatedUser = authService.getUserByToken(payload.token);
+          logger.info("Client authenticated successfully", {
+            clientIp,
+            version: payload.clientVersion,
+            user: authenticatedUser ? authenticatedUser.username : "admin/master"
+          });
           const serverHello = {
             serverVersion: "1.0.0",
             authenticated: true,
             maxBodySize: config.maxBodySize,
             allowedDurations: [1800, 3600, 7200, 10800],
             // 30m, 1h, 2h, 3h
-            message: "Connected to R-Tunnel server"
+            message: authenticatedUser ? `Connected to R-Tunnel as ${authenticatedUser.username}` : "Connected to R-Tunnel server"
           };
           ws.send(serializeMessage(createMessage("server_hello", serverHello, void 0, msg.requestId)));
           break;
@@ -1453,6 +1940,48 @@ function handleClientWebSocketConnection(ws, req) {
             );
             return;
           }
+          if (authenticatedUser) {
+            const freshUser = userService.getUserById(authenticatedUser.id);
+            if (!freshUser || freshUser.status !== "active") {
+              ws.send(
+                serializeMessage(
+                  createMessage("error", {
+                    code: "USER_SUSPENDED",
+                    message: "Your user account has been suspended by the administrator."
+                  }, void 0, msg.requestId)
+                )
+              );
+              ws.close(4003, "User suspended");
+              return;
+            }
+            if (freshUser.expiresAt && Date.now() > freshUser.expiresAt) {
+              ws.send(
+                serializeMessage(
+                  createMessage("error", {
+                    code: "KEY_EXPIRED",
+                    message: "Your Master Key has expired. Please contact the administrator."
+                  }, void 0, msg.requestId)
+                )
+              );
+              ws.close(4004, "Key expired");
+              return;
+            }
+            if (freshUser.maxTunnels > 0) {
+              const activeTunnels = await tunnelStore.getActive();
+              const userActiveCount = activeTunnels.filter((t) => t.userId === freshUser.id).length;
+              if (userActiveCount >= freshUser.maxTunnels) {
+                ws.send(
+                  serializeMessage(
+                    createMessage("error", {
+                      code: "QUOTA_EXCEEDED",
+                      message: `Quota exceeded: Maximum ${freshUser.maxTunnels} active tunnel(s) reached for user "${freshUser.username}".`
+                    }, void 0, msg.requestId)
+                  )
+                );
+                return;
+              }
+            }
+          }
           const payload = msg.payload;
           if (!payload || !payload.port) {
             ws.send(
@@ -1468,6 +1997,17 @@ function handleClientWebSocketConnection(ws, req) {
           if (payload.customTunnelId) {
             const existing = await tunnelStore.get(payload.customTunnelId);
             if (existing && existing.status !== "expired" && existing.expiresAt > Date.now()) {
+              if (authenticatedUser && existing.userId && existing.userId !== authenticatedUser.id && authenticatedUser.role !== "admin") {
+                ws.send(
+                  serializeMessage(
+                    createMessage("error", {
+                      code: "FORBIDDEN",
+                      message: "This tunnel belongs to another user account."
+                    }, void 0, msg.requestId)
+                  )
+                );
+                return;
+              }
               boundTunnelId = existing.id;
               await tunnelManager.bindClientConnection(existing.id, ws, clientIp);
               const createdPayload2 = {
@@ -1486,9 +2026,11 @@ function handleClientWebSocketConnection(ws, req) {
           const { tunnel, error } = await tunnelManager.createTunnel({
             port: payload.port,
             durationSeconds: payload.durationSeconds,
-            label: payload.label,
+            label: payload.label || (authenticatedUser ? `${authenticatedUser.username} :${payload.port}` : void 0),
             customTunnelId: payload.customTunnelId,
-            clientIp
+            clientIp,
+            userId: authenticatedUser?.id,
+            username: authenticatedUser?.username
           });
           if (error || !tunnel) {
             ws.send(
@@ -1551,30 +2093,30 @@ function handleClientWebSocketConnection(ws, req) {
 
 // server/src/server.ts
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path.dirname(__filename);
+var __dirname = path2.dirname(__filename);
 function resolveWebDir() {
   const candidates = [
-    path.resolve(process.cwd(), "web"),
-    path.resolve(__dirname, "../../web"),
-    path.resolve(__dirname, "../web"),
-    path.resolve(__dirname, "web"),
+    path2.resolve(process.cwd(), "web"),
+    path2.resolve(__dirname, "../../web"),
+    path2.resolve(__dirname, "../web"),
+    path2.resolve(__dirname, "web"),
     "/app/applet/web"
   ];
   for (const dir of candidates) {
-    if (fs.existsSync(dir)) {
+    if (fs2.existsSync(dir)) {
       return dir;
     }
   }
-  return path.resolve(process.cwd(), "web");
+  return path2.resolve(process.cwd(), "web");
 }
 var webDir = resolveWebDir();
-var clientBundlePath = path.join(webDir, "dist", "bundle.js");
-if (!fs.existsSync(clientBundlePath)) {
+var clientBundlePath = path2.join(webDir, "dist", "bundle.js");
+if (!fs2.existsSync(clientBundlePath)) {
   try {
     const { buildSync } = await import("esbuild");
-    const entry = path.resolve(process.cwd(), "src/main.tsx");
-    if (fs.existsSync(entry)) {
-      fs.mkdirSync(path.join(webDir, "dist"), { recursive: true });
+    const entry = path2.resolve(process.cwd(), "src/main.tsx");
+    if (fs2.existsSync(entry)) {
+      fs2.mkdirSync(path2.join(webDir, "dist"), { recursive: true });
       buildSync({
         entryPoints: [entry],
         bundle: true,
@@ -1623,7 +2165,7 @@ app.use(
 );
 var serveReactApp = (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.sendFile(path.join(webDir, "index.html"));
+  res.sendFile(path2.join(webDir, "index.html"));
 };
 app.get("/", serveReactApp);
 app.get("/dashboard", serveReactApp);
@@ -1632,7 +2174,7 @@ app.get("/docs", serveReactApp);
 app.use((req, res) => {
   if (req.accepts("html")) {
     res.setHeader("Cache-Control", "no-cache");
-    res.status(404).sendFile(path.join(webDir, "error.html"));
+    res.status(404).sendFile(path2.join(webDir, "error.html"));
   } else {
     res.status(404).json({ error: "Not Found", path: req.path });
   }

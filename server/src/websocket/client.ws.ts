@@ -3,6 +3,7 @@ import { IncomingMessage } from 'node:http';
 import { config } from '../config.js';
 import { logger } from '../logging/logger.js';
 import { authService } from '../auth/auth.service.js';
+import { ManagedUser, userService } from '../auth/user.service.js';
 import { tunnelManager } from '../tunnels/tunnel.manager.js';
 import { tunnelStore } from '../tunnels/tunnel.store.js';
 import {
@@ -22,6 +23,7 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
     req.socket.remoteAddress || 'unknown';
 
   let isAuthenticated = false;
+  let authenticatedUser: ManagedUser | null = null;
   let boundTunnelId: string | null = null;
   let isAlive = true;
 
@@ -65,13 +67,13 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
 
         case 'client_hello': {
           const payload = msg.payload as ClientHelloPayload;
-          if (!payload || !authService.verifyClientToken(payload.token)) {
+          if (!payload || !authService.verifyClientToken(payload.token, clientIp)) {
             logger.warn('Client authentication failed', { clientIp });
             ws.send(
               serializeMessage(
                 createMessage<ErrorPayload>('error', {
                   code: 'UNAUTHORIZED',
-                  message: 'Authentication failed. Invalid tunnel token.',
+                  message: 'Authentication failed. Invalid master key or tunnel token.',
                 })
               )
             );
@@ -80,14 +82,22 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
           }
 
           isAuthenticated = true;
-          logger.info('Client authenticated successfully', { clientIp, version: payload.clientVersion });
+          authenticatedUser = authService.getUserByToken(payload.token);
+
+          logger.info('Client authenticated successfully', {
+            clientIp,
+            version: payload.clientVersion,
+            user: authenticatedUser ? authenticatedUser.username : 'admin/master',
+          });
 
           const serverHello: ServerHelloPayload = {
             serverVersion: '1.0.0',
             authenticated: true,
             maxBodySize: config.maxBodySize,
             allowedDurations: [1800, 3600, 7200, 10800], // 30m, 1h, 2h, 3h
-            message: 'Connected to R-Tunnel server',
+            message: authenticatedUser
+              ? `Connected to R-Tunnel as ${authenticatedUser.username}`
+              : 'Connected to R-Tunnel server',
           };
           ws.send(serializeMessage(createMessage('server_hello', serverHello, undefined, msg.requestId)));
           break;
@@ -104,6 +114,53 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
               )
             );
             return;
+          }
+
+          // If connected using a managed user Master Key, enforce user policies
+          if (authenticatedUser) {
+            const freshUser = userService.getUserById(authenticatedUser.id);
+            if (!freshUser || freshUser.status !== 'active') {
+              ws.send(
+                serializeMessage(
+                  createMessage<ErrorPayload>('error', {
+                    code: 'USER_SUSPENDED',
+                    message: 'Your user account has been suspended by the administrator.',
+                  }, undefined, msg.requestId)
+                )
+              );
+              ws.close(4003, 'User suspended');
+              return;
+            }
+
+            if (freshUser.expiresAt && Date.now() > freshUser.expiresAt) {
+              ws.send(
+                serializeMessage(
+                  createMessage<ErrorPayload>('error', {
+                    code: 'KEY_EXPIRED',
+                    message: 'Your Master Key has expired. Please contact the administrator.',
+                  }, undefined, msg.requestId)
+                )
+              );
+              ws.close(4004, 'Key expired');
+              return;
+            }
+
+            // Check concurrent tunnel quota for this user
+            if (freshUser.maxTunnels > 0) {
+              const activeTunnels = await tunnelStore.getActive();
+              const userActiveCount = activeTunnels.filter((t) => t.userId === freshUser.id).length;
+              if (userActiveCount >= freshUser.maxTunnels) {
+                ws.send(
+                  serializeMessage(
+                    createMessage<ErrorPayload>('error', {
+                      code: 'QUOTA_EXCEEDED',
+                      message: `Quota exceeded: Maximum ${freshUser.maxTunnels} active tunnel(s) reached for user "${freshUser.username}".`,
+                    }, undefined, msg.requestId)
+                  )
+                );
+                return;
+              }
+            }
           }
 
           const payload = msg.payload as CreateTunnelPayload;
@@ -123,6 +180,24 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
           if (payload.customTunnelId) {
             const existing = await tunnelStore.get(payload.customTunnelId);
             if (existing && existing.status !== 'expired' && existing.expiresAt > Date.now()) {
+              // Check ownership if tunnel belongs to another user
+              if (
+                authenticatedUser &&
+                existing.userId &&
+                existing.userId !== authenticatedUser.id &&
+                authenticatedUser.role !== 'admin'
+              ) {
+                ws.send(
+                  serializeMessage(
+                    createMessage<ErrorPayload>('error', {
+                      code: 'FORBIDDEN',
+                      message: 'This tunnel belongs to another user account.',
+                    }, undefined, msg.requestId)
+                  )
+                );
+                return;
+              }
+
               boundTunnelId = existing.id;
               await tunnelManager.bindClientConnection(existing.id, ws, clientIp);
 
@@ -141,13 +216,15 @@ export function handleClientWebSocketConnection(ws: WebSocket, req: IncomingMess
             }
           }
 
-          // Create fresh tunnel
+          // Create fresh tunnel with user tagging
           const { tunnel, error } = await tunnelManager.createTunnel({
             port: payload.port,
             durationSeconds: payload.durationSeconds,
-            label: payload.label,
+            label: payload.label || (authenticatedUser ? `${authenticatedUser.username} :${payload.port}` : undefined),
             customTunnelId: payload.customTunnelId,
             clientIp,
+            userId: authenticatedUser?.id,
+            username: authenticatedUser?.username,
           });
 
           if (error || !tunnel) {

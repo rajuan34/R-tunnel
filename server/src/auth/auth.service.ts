@@ -1,10 +1,13 @@
 import { config } from '../config.js';
 import { verifyPassword, hashPassword, generateSecureToken, timingSafeEqual } from '../utils/crypto.js';
 import { logger } from '../logging/logger.js';
+import { userService, ManagedUser } from './user.service.js';
 
 export interface AdminSession {
   token: string;
   username: string;
+  role?: 'admin' | 'user';
+  userId?: string;
   createdAt: number;
   expiresAt: number;
   csrfToken: string;
@@ -29,47 +32,54 @@ export class AuthService {
   }
 
   /**
-   * Verify admin credentials.
+   * Verify admin or user credentials for dashboard access.
    */
-  async verifyAdmin(username: string, passwordPlain: string): Promise<boolean> {
-    if (!username || !passwordPlain) return false;
-    if (username !== config.adminUsername) return false;
+  async verifyAdmin(username: string, passwordPlain: string): Promise<{ valid: boolean; user?: ManagedUser }> {
+    if (!username || !passwordPlain) return { valid: false };
 
-    // 1. If ADMIN_PASSWORD (plaintext) is provided, verify using timing-safe comparison
-    if (config.adminPassword) {
-      return timingSafeEqual(passwordPlain, config.adminPassword);
-    }
-
-    // 2. If ADMIN_PASSWORD_HASH is set, verify against bcrypt hash
-    if (config.adminPasswordHash) {
-      try {
-        return await verifyPassword(passwordPlain, config.adminPasswordHash);
-      } catch (err) {
-        logger.error('Error verifying admin password hash', { err });
-        return false;
+    // 1. Primary config admin account
+    if (username === config.adminUsername) {
+      if (config.adminPassword) {
+        if (timingSafeEqual(passwordPlain, config.adminPassword)) {
+          return { valid: true };
+        }
+      } else if (config.adminPasswordHash) {
+        try {
+          const ok = await verifyPassword(passwordPlain, config.adminPasswordHash);
+          if (ok) return { valid: true };
+        } catch (err) {
+          logger.error('Error verifying admin password hash', { err });
+        }
+      } else if (!config.isProduction) {
+        if (passwordPlain === 'admin') {
+          return { valid: true };
+        }
       }
     }
 
-    // 3. Fallback in development mode: allow admin/admin with warning
-    if (!config.isProduction) {
-      logger.warn('Neither ADMIN_PASSWORD nor ADMIN_PASSWORD_HASH is set. Allowing dev login (admin/admin).');
-      return passwordPlain === 'admin';
+    // 2. Check if a managed user exists with matching Master Key
+    const managedUser = userService.getUserByUsername(username);
+    if (managedUser && managedUser.status === 'active') {
+      if (timingSafeEqual(passwordPlain, managedUser.masterKey)) {
+        return { valid: true, user: managedUser };
+      }
     }
 
-    logger.error('ADMIN_PASSWORD or ADMIN_PASSWORD_HASH is required in production environment');
-    return false;
+    return { valid: false };
   }
 
   /**
-   * Create an admin session after successful login.
+   * Create a session after successful login.
    */
-  createSession(username: string): AdminSession {
+  createSession(username: string, role: 'admin' | 'user' = 'admin', userId?: string): AdminSession {
     const token = generateSecureToken(32);
     const csrfToken = generateSecureToken(24);
     const now = Date.now();
     const session: AdminSession = {
       token,
       username,
+      role,
+      userId,
       createdAt: now,
       expiresAt: now + this.sessionTtlMs,
       csrfToken,
@@ -102,18 +112,21 @@ export class AuthService {
   }
 
   /**
-   * Verify a Termux client token.
-   * Can be either the server's TUNNEL_MASTER_TOKEN or an ephemeral client token.
+   * Verify a Termux client token or user Master Key.
+   * Can be either:
+   * 1. The server's TUNNEL_MASTER_TOKEN
+   * 2. An ephemeral client token
+   * 3. A dedicated Managed User Master Key
    */
-  verifyClientToken(token: string): boolean {
+  verifyClientToken(token: string, clientIp?: string): boolean {
     if (!token) return false;
 
-    // Check master token if configured
+    // 1. Check server master token if configured
     if (config.tunnelMasterToken && timingSafeEqual(token, config.tunnelMasterToken)) {
       return true;
     }
 
-    // Check ephemeral/issued client tokens
+    // 2. Check ephemeral/issued client tokens
     const clientToken = this.clientTokens.get(token);
     if (clientToken) {
       if (Date.now() <= clientToken.expiresAt) {
@@ -122,12 +135,26 @@ export class AuthService {
       this.clientTokens.delete(token);
     }
 
+    // 3. Check managed user master key
+    const user = userService.verifyUserMasterKey(token, clientIp);
+    if (user) {
+      return true;
+    }
+
     // In dev mode only: if neither master token nor client token is set, accept 'dev-tunnel-token'
     if (!config.isProduction && !config.tunnelMasterToken && token === 'dev-tunnel-token') {
       return true;
     }
 
     return false;
+  }
+
+  /**
+   * Get user assigned to this Master Key if any.
+   */
+  getUserByToken(token: string): ManagedUser | null {
+    if (!token) return null;
+    return userService.getUserByMasterKey(token);
   }
 
   /**
